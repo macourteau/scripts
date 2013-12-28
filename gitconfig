@@ -1,0 +1,20 @@
+[color]
+	pager = true
+	ui = auto
+[grep]
+	lineNumber = true
+	extendedRegexp = true
+[core]
+	eol = native
+	editor = vi
+[http]
+	sslVerify = false
+[mergetool]
+	keepBackup = true
+[branch]
+	autosetuprebase = local
+[alias]
+	br = branch
+	co = checkout
+	rb = rebase
+	st = status
