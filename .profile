@@ -3,8 +3,7 @@ export PATH=/usr/local/bin:$HOME/bin:$PATH
 darwin=$(expr $(uname -a | grep -i darwin | wc -l))
 
 # Setup an 'l' alias.
-if [[ $darwin -ne 0 ]]
-then
+if [[ $darwin -ne 0 ]]; then
   # Mac-specific aliases.
   alias l='ls -AlG'
   alias ldd='otool -L'
@@ -22,6 +21,19 @@ alias egrep='egrep --color=auto'
 # Enable color in less.
 alias less='less -R'
 export LESS=FRSX
+
+# if running bash
+if [ -n "$BASH_VERSION" ]; then
+  # include .bashrc if it exists
+  if [ -f "$HOME/.bashrc" ]; then
+    . "$HOME/.bashrc"
+  fi
+fi
+
+# set PATH so it includes user's private bin if it exists
+if [ -d "$HOME/bin" ] ; then
+  PATH="$HOME/bin:$PATH"
+fi
 
 # Setup the prompt.
 if [ "$PS1" ]; then
@@ -51,31 +63,26 @@ shopt -s cmdhist
 shopt -s histappend
 
 # Load the ICC compiler vars if it is installed.
-if [[ -e /opt/intel/bin/compilervars.sh ]]
-then
+if [[ -e /opt/intel/bin/compilervars.sh ]]; then
   source /opt/intel/bin/compilervars.sh intel64
 fi
 
 # Tell gyp to generate ninja build files, and if on Mac, Xcode projects as well.
-if [[ $darwin -ne 0 ]]
-then
+if [[ $darwin -ne 0 ]]; then
   export GYP_GENERATORS="ninja"
 else
   export GYP_GENERATORS="ninja xcode"
 fi
 
 # Add npm binaries to the path if present.
-if [[ -e /usr/local/share/npm/bin ]]
-then
+if [[ -e /usr/local/share/npm/bin ]]; then
   export PATH="$PATH":/usr/local/share/npm/bin
 fi
 
-if [[ -e /usr/local/lib/node ]]
-then
+if [[ -e /usr/local/lib/node ]]; then
   export NODE_PATH=/usr/local/lib/node
 fi
 
-if [[ -e $HOME/gocode ]]
-then
+if [[ -e $HOME/gocode ]]; then
   export GOPATH=$HOME/gocode
 fi
