@@ -69,9 +69,9 @@ fi
 
 # Tell gyp to generate ninja build files, and if on Mac, Xcode projects as well.
 if [[ $darwin -ne 0 ]]; then
-  export GYP_GENERATORS="ninja"
-else
   export GYP_GENERATORS="ninja xcode"
+else
+  export GYP_GENERATORS="ninja"
 fi
 
 # Add npm binaries to the path if present.
