@@ -1,6 +1,6 @@
 export PATH=/usr/local/bin:$HOME/bin:$PATH
 
-darwin=$(expr $(uname -a | grep -i darwin | wc -l))
+readonly darwin=$(expr $(uname -a | grep -i darwin | wc -l))
 
 # Setup an 'l' alias.
 if [[ $darwin -ne 0 ]]; then
@@ -83,18 +83,22 @@ if [[ -e /usr/local/lib/node ]]; then
   export NODE_PATH=/usr/local/lib/node
 fi
 
+# Setup path for Go.
 if [[ -e $HOME/gocode ]]; then
   export GOPATH=$HOME/gocode
 fi
 
+# Bash completion provided by homebrew (if installed).
 command -v brew > /dev/null 2>&1 && if [[ -f $(brew --prefix)/etc/bash_completion ]]; then
-  source $(brew --prefix)/etc/bash_completion
+  . $(brew --prefix)/etc/bash_completion
 fi
 
-if [[ -d /Applications/Sublime\ Text\ 2.app/Contents/SharedSupport/bin ]]; then
+# Add the 'subl' binary to the path if Sublime Text 2 is installed.
+if [[ $darwin -ne 0 && -d /Applications/Sublime\ Text\ 2.app/Contents/SharedSupport/bin ]]; then
   export PATH="$PATH":/Applications/Sublime\ Text\ 2.app/Contents/SharedSupport/bin
 fi
 
+# TeX.
 if [[ -d /usr/texbin ]]; then
   export PATH="$PATH":/usr/texbin
 fi
