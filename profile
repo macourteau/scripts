@@ -64,7 +64,7 @@ shopt -s histappend
 
 # Load the ICC compiler vars if it is installed.
 if [[ -e /opt/intel/bin/compilervars.sh ]]; then
-  source /opt/intel/bin/compilervars.sh intel64
+  . /opt/intel/bin/compilervars.sh intel64
 fi
 
 # Tell gyp to generate ninja build files, and if on Mac, Xcode projects as well.
