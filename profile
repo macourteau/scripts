@@ -86,3 +86,15 @@ fi
 if [[ -e $HOME/gocode ]]; then
   export GOPATH=$HOME/gocode
 fi
+
+command -v brew > /dev/null 2>&1 && if [[ -f $(brew --prefix)/etc/bash_completion ]]; then
+  source $(brew --prefix)/etc/bash_completion
+fi
+
+if [[ -d /Applications/Sublime\ Text\ 2.app/Contents/SharedSupport/bin ]]; then
+  export PATH="$PATH":/Applications/Sublime\ Text\ 2.app/Contents/SharedSupport/bin
+fi
+
+if [[ -d /usr/texbin ]]; then
+  export PATH="$PATH":/usr/texbin
+fi
