@@ -18,3 +18,5 @@
 	co = checkout
 	rb = rebase
 	st = status
+[push]
+	default = simple
