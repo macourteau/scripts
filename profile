@@ -102,3 +102,10 @@ fi
 if [[ -d /usr/texbin ]]; then
   export PATH="$PATH":/usr/texbin
 fi
+
+# Source any "local" additions to profile.
+if [[ -d $HOME/.profile.d ]]; then
+  ls $HOME/.profile.d/ | while read x; do
+    . "${HOME}/.profile.d/${x}"
+  done
+fi

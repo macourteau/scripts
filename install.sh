@@ -1,21 +1,28 @@
-#!/bin/bash -e
+#!/bin/bash -eu
 
-git_user_name=$(git config --global user.name || echo -n)
-git_user_email=$(git config --global user.email || echo -n)
+readonly git_user_name=$(git config --global user.name || echo -n)
+readonly git_user_email=$(git config --global user.email || echo -n)
 
-if [[ ! -d ~/.ssh ]]
+if [[ ! -d $HOME/.ssh ]]
 then
-  mkdir ~/.ssh
-  chmod 700 ~/.ssh
+  mkdir $HOME/.ssh
+  chmod 700 $HOME/.ssh
 fi
 
-cp -v gitconfig ~/.gitconfig
-cp -v profile ~/.profile
-cp -v screenrc ~/.screenrc
-cp -v vimrc ~/.vimrc
-if [[ ! -e ~/.ssh/config ]]
+cp -v gitconfig $HOME/.gitconfig
+cp -v screenrc $HOME/.screenrc
+cp -v vimrc $HOME/.vimrc
+
+cp -v profile $HOME/.profile
+mkdir -p $HOME/.profile.d
+
+if [[ ! -e $HOME/.ssh/config ]]
 then
-  cp -v sshconfig ~/.ssh/config
+  cp -v sshconfig $HOME/.ssh/config
+fi
+
+if [[ "x$(uname)" == "xDarwin" ]]; then
+  cat screenrc | grep -v deflogin > $HOME/.screenrc
 fi
 
 if [[ "$git_user_name" == "" ]]; then
@@ -28,3 +35,10 @@ fi
 
 git config --global user.name "$git_user_name"
 git config --global user.email "$git_user_email"
+
+function install-binary() {
+  cp -v "bin/$1" "${HOME}/bin" && chmod +x "${HOME}/bin/$1"
+}
+
+mkdir -p $HOME/bin
+install-binary ssh-tmux
