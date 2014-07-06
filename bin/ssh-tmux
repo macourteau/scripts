@@ -23,7 +23,7 @@ readonly TMUX_CMD="${TMUX} has -t ${SESSION_NAME} >/dev/null 2>&1 && \
 # Reconnect forever unless SSH exits successfully.
 while [[ 1 ]]; do
   ssh -t ${HOST} ${SSH_OPTS[@]} "bash -l -c \"${TMUX_CMD}\""
-  SSH_RC=$0
+  SSH_RC=$?
 
   if [[ $SSH_RC -eq 0 ]]; then
     break
