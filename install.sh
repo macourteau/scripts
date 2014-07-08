@@ -12,6 +12,7 @@ fi
 cp -v gitconfig $HOME/.gitconfig
 cp -v screenrc $HOME/.screenrc
 cp -v vimrc $HOME/.vimrc
+cp -v tmux.conf $HOME/.tmux.conf
 
 cp -v profile $HOME/.profile
 mkdir -p $HOME/.profile.d
