@@ -105,7 +105,7 @@ fi
 
 # Source any "local" additions to profile.
 if [[ -d "${HOME}/.profile.d" ]]; then
-  ls "${HOME}/.profile.d" | while read x; do
+  for x in $(ls "${HOME}/.profile.d"); do
     . "${HOME}/.profile.d/${x}"
   done
 fi
