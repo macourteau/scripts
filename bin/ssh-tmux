@@ -25,10 +25,13 @@ while [[ 1 ]]; do
   ssh -t ${HOST} ${SSH_OPTS[@]} "bash -l -c \"${TMUX_CMD}\""
   SSH_RC=$?
 
+  # Reset terminal.
+  reset
+
   if [[ $SSH_RC -eq 0 ]]; then
     break
   fi
 
-  echo "SSH exited with code $SSH_RC, reconnecting in ${SLEEP_DELAY} seconds..."
+  echo "SSH exited with code ${SSH_RC}, reconnecting in ${SLEEP_DELAY} seconds..."
   sleep ${SLEEP_DELAY}
 done
