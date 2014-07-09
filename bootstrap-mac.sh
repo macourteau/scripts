@@ -391,7 +391,7 @@ defaults write com.apple.appstore ShowDebugMenu -bool true
 for app in "Activity Monitor" "Address Book" "Calendar" "Contacts" "cfprefsd" \
     "Dock" "Finder" "Mail" "Messages" "Safari" "SystemUIServer" "Terminal" \
     "iCal"; do
-  killall "${app}" > /dev/null 2>&1
+  killall "${app}" > /dev/null 2>&1 || true
 done
 
 echo "Done. Some of these changes require a logout/restart to take effect."
