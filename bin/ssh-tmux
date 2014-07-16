@@ -1,31 +1,27 @@
 #!/bin/bash -eu
 
-if [[ $# -ne 2 ]]; then
-  echo "usage: $(basename $0) <host> <session_name>" 1>&2
+if [[ $# -lt 1 ]]; then
+  echo "usage: $(basename $0) <host> [session_name]" 1>&2
   exit 1
 fi
 
 readonly SLEEP_DELAY=5
 readonly ALIVE_INTERVAL=10
 readonly HOST=$1
-readonly SESSION_NAME=$2
+readonly SESSION_NAME=${2:-remote}
 
 readonly SSH_OPTS=(
   -oCompression=yes
   -oServerAliveInterval=${ALIVE_INTERVAL}
 )
 
-readonly TMUX="tmux -2 -CC"
-readonly TMUX_CMD="${TMUX} has -t ${SESSION_NAME} >/dev/null 2>&1 && \
-  ${TMUX} attach -t ${SESSION_NAME} || \
-  ${TMUX} new -s ${SESSION_NAME}"
-
 # Reconnect forever unless SSH exits successfully.
 while [[ 1 ]]; do
-  ssh -t ${HOST} ${SSH_OPTS[@]} "bash -l -c \"${TMUX_CMD}\""
+  ssh -t ${HOST} ${SSH_OPTS[@]} tmux -2 -CC new-session -A -s ${SESSION_NAME}
   SSH_RC=$?
 
-  # Reset terminal.
+  echo ""
+  echo "%exit ssh quit"
   reset
 
   if [[ $SSH_RC -eq 0 ]]; then
@@ -33,5 +29,6 @@ while [[ 1 ]]; do
   fi
 
   echo "SSH exited with code ${SSH_RC}, reconnecting in ${SLEEP_DELAY} seconds..."
+  echo ""
   sleep ${SLEEP_DELAY}
 done
