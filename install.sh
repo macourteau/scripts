@@ -1,7 +1,7 @@
 #!/bin/bash -eu
 
-readonly git_user_name=$(git config --global user.name || echo -n)
-readonly git_user_email=$(git config --global user.email || echo -n)
+git_user_name=$(git config --global user.name || echo -n)
+git_user_email=$(git config --global user.email || echo -n)
 
 if [[ ! -d $HOME/.ssh ]]
 then
@@ -13,6 +13,9 @@ cp -v gitconfig $HOME/.gitconfig
 cp -v screenrc $HOME/.screenrc
 cp -v vimrc $HOME/.vimrc
 cp -v tmux.conf $HOME/.tmux.conf
+
+# Vim colorscheme.
+git clone https://github.com/nanotech/jellybeans.vim $HOME/.vim
 
 cp -v profile $HOME/.profile
 mkdir -p $HOME/.profile.d

@@ -6,7 +6,9 @@
 	extendedRegexp = true
 [core]
 	eol = native
-	editor = vi
+	editor = vim
+	autocrlf = false
+	filemode = false
 [http]
 	sslVerify = false
 [mergetool]
