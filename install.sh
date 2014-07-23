@@ -63,7 +63,7 @@ git config --global user.name "$git_user_name"
 git config --global user.email "$git_user_email"
 
 # Pathogen for vim.
-mkdir -p $HOME/.vim/autoload $HOME/.vim/bundle
+mkdir -p $HOME/.vim/autoload $HOME/.vim/bundle $HOME/.vim/plugin
 curl -LSso $HOME/.vim/autoload/pathogen.vim https://tpo.pe/pathogen.vim
 
 # Solarized color theme for vim.
@@ -100,5 +100,9 @@ if [[ ! -e $HOME/.vim/bundle/vim-bufferline ]]; then
   git clone git://github.com/bling/vim-bufferline.git
   popd
 fi
+
+# autoclose plugin for vim.
+curl -LSso $HOME/.vim/plugin/autoclose.vim \
+    http://www.vim.org/scripts/download_script.php?src_id=10873
 
 install-binary ssh-tmux
