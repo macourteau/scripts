@@ -101,8 +101,15 @@ if [[ ! -e $HOME/.vim/bundle/vim-bufferline ]]; then
   popd
 fi
 
-# autoclose plugin for vim.
-curl -LSso $HOME/.vim/plugin/autoclose.vim \
-    http://www.vim.org/scripts/download_script.php?src_id=10873
+# autoclose plugin for vim. Remove if installed.
+rm -f $HOME/.vim/plugin/autoclose.vim
+
+# auto-pairs for vim.
+if [[ ! -e $HOME/.vim/bundle/auto-pairs ]]; then
+  pushd $HOME/.vim/bundle
+  git clone git://github.com/jiangmiao/auto-pairs.git
+  popd
+fi
+
 
 install-binary ssh-tmux
