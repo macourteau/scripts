@@ -17,7 +17,14 @@ readonly SSH_OPTS=(
 
 # Reconnect forever unless SSH exits successfully.
 while [[ 1 ]]; do
-  ssh -t ${HOST} ${SSH_OPTS[@]} tmux -2 -CC new-session -A -s ${SESSION_NAME}
+  SSH_FLAGS=(
+    -t ${HOST} ${SSH_OPTS[@]}
+    "[ -e ~/.profile ] && source ~/.profile;"
+    tmux -2 -CC new-session -A -s ${SESSION_NAME}
+  )
+
+  echo "executing: \"ssh ${SSH_FLAGS[@]}\""
+  ssh ${SSH_FLAGS[@]}
   SSH_RC=$?
 
   echo ""
