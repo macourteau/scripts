@@ -1,4 +1,4 @@
-export PATH=/usr/local/bin:$HOME/bin:$PATH
+export PATH=/usr/local/sbin:/usr/local/bin:$HOME/bin:$PATH
 
 readonly darwin=$(expr $(uname -a | grep -i darwin | wc -l))
 
