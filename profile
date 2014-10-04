@@ -25,14 +25,14 @@ export LESS=FRSX
 # if running bash
 if [ -n "$BASH_VERSION" ]; then
   # include .bashrc if it exists
-  if [ -f "$HOME/.bashrc" ]; then
-    . "$HOME/.bashrc"
+  if [ -f "${HOME}/.bashrc" ]; then
+    . "${HOME}/.bashrc"
   fi
 fi
 
 # set PATH so it includes user's private bin if it exists
-if [ -d "$HOME/bin" ] ; then
-  PATH="$HOME/bin:$PATH"
+if [ -d "${HOME}/bin" ] ; then
+  PATH="${HOME}/bin:$PATH"
 fi
 
 # Setup the prompt.
@@ -40,7 +40,7 @@ if [ "$PS1" ]; then
   if [ "$BASH" ]; then
     PS1='\u@\h:\w$ '
   else
-    if [ "`id -u`" -eq 0 ]; then
+    if [ "$(id -u)" -eq 0 ]; then
       PS1='# '
     else
       PS1='$ '
@@ -74,18 +74,19 @@ else
   export GYP_GENERATORS="ninja"
 fi
 
-# Add npm binaries to the path if present.
+# Append npm binaries to the path if present.
 if [[ -e /usr/local/share/npm/bin ]]; then
   export PATH="$PATH":/usr/local/share/npm/bin
 fi
 
+# Setup path for node.js.
 if [[ -e /usr/local/lib/node ]]; then
   export NODE_PATH=/usr/local/lib/node
 fi
 
 # Setup path for Go.
-if [[ -e $HOME/gocode ]]; then
-  export GOPATH=$HOME/gocode
+if [[ -e "${HOME}/gocode" ]]; then
+  export GOPATH="${HOME}/gocode"
 fi
 
 # Bash completion provided by homebrew (if installed).
