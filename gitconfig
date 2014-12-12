@@ -1,24 +1,25 @@
 [color]
-	pager = true
-	ui = auto
+  pager = true
+  ui = auto
 [grep]
-	lineNumber = true
-	extendedRegexp = true
+  lineNumber = true
+  extendedRegexp = true
 [core]
-	eol = native
-	editor = vim
-	autocrlf = false
-	filemode = false
+  eol = native
+  editor = vim
+  autocrlf = false
+  filemode = false
 [http]
-	sslVerify = false
+  sslVerify = false
 [mergetool]
-	keepBackup = true
+  keepBackup = true
 [branch]
-	autosetuprebase = local
+  autosetupmerge = always
+  autosetuprebase = local
 [alias]
-	br = branch
-	co = checkout
-	rb = rebase
-	st = status
+  br = branch
+  co = checkout
+  rb = rebase
+  st = status
 [push]
-	default = simple
+  default = simple
