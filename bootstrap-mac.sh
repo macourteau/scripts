@@ -38,7 +38,7 @@ fi
 ################################################################################
 
 # Increase window resize speed for Cocoa applications
-defaults write -g NSWindowResizeTime -float 0.05
+defaults write -g NSWindowResizeTime -float 0.02
 
 # Expand save panel by default
 defaults write -g NSNavPanelExpandedStateForSaveMode -bool true
@@ -50,6 +50,10 @@ defaults write -g PMPrintingExpandedStateForPrint2 -bool true
 
 # Save to disk (not to iCloud) by default
 defaults write -g NSDocumentSaveNewDocumentsToCloud -bool false
+
+# Key repeat rate and delay before repeat.
+defaults write -g InitialKeyRepeat -int 25
+defaults write -g KeyRepeat -int 2
 
 # Automatically quit printer app once the print jobs complete
 #defaults write com.apple.print.PrintingPrefs "Quit When Finished" -bool true
@@ -183,6 +187,14 @@ defaults write com.apple.desktopservices DSDontWriteNetworkStores -bool true
 defaults write com.apple.frameworks.diskimages auto-open-ro-root -bool true
 defaults write com.apple.frameworks.diskimages auto-open-rw-root -bool true
 defaults write com.apple.finder OpenWindowForNewRemovableDisk -bool true
+
+# Calculate all sizes.
+/usr/libexec/PlistBuddy -c \
+    "Set :StandardViewSettings:ExtendedListViewSettings:calculateAllSizes bool true" \
+    ~/Library/Preferences/com.apple.finder.plist
+/usr/libexec/PlistBuddy -c \
+    "Set :StandardViewSettings:ListViewSettings:calculateAllSizes bool true" \
+    ~/Library/Preferences/com.apple.finder.plist
 
 # Enable snap-to-grid for icons on the desktop and in other icon views
 /usr/libexec/PlistBuddy -c \

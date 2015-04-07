@@ -14,10 +14,9 @@
 [mergetool]
 	keepBackup = true
 [branch]
-	autosetupmerge = always
 	autosetuprebase = local
 [alias]
-	br = branch
+	br = branch -vv
 	co = checkout
 	rb = rebase
 	st = status
