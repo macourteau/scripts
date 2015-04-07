@@ -188,6 +188,17 @@ defaults write com.apple.frameworks.diskimages auto-open-ro-root -bool true
 defaults write com.apple.frameworks.diskimages auto-open-rw-root -bool true
 defaults write com.apple.finder OpenWindowForNewRemovableDisk -bool true
 
+# Disable recent items.
+/usr/libexec/PlistBuddy -c \
+    "Set :RecentApplications:MaxAmount integer 0" \
+    ~/Library/Preferences/com.apple.recentitems.plist
+/usr/libexec/PlistBuddy -c \
+    "Set :RecentDocuments:MaxAmount integer 0" \
+    ~/Library/Preferences/com.apple.recentitems.plist
+/usr/libexec/PlistBuddy -c \
+    "Set :RecentServers:MaxAmount integer 0" \
+    ~/Library/Preferences/com.apple.recentitems.plist
+
 # Calculate all sizes.
 /usr/libexec/PlistBuddy -c \
     "Set :StandardViewSettings:ExtendedListViewSettings:calculateAllSizes bool true" \
@@ -413,6 +424,38 @@ defaults write com.apple.appstore WebKitDeveloperExtras -bool true
 
 # Enable Debug Menu in the Mac App Store
 defaults write com.apple.appstore ShowDebugMenu -bool true
+
+################################################################################
+# Login                                                                        #
+################################################################################
+
+sudo /usr/libexec/PlistBuddy -c \
+    "Set :GuestEnabled false" \
+    /Library/Preferences/com.apple.loginwindow.plist
+
+sudo /usr/libexec/PlistBuddy -c \
+    "Set :SHOWFULLNAME true" \
+    /Library/Preferences/com.apple.loginwindow.plist
+
+################################################################################
+# SSH & screen sharing                                                         #
+################################################################################
+
+sudo /usr/libexec/PlistBuddy -c \
+    "Set :com.apple.screensharing:Disabled false" \
+    /var/db/launchd.db/com.apple.launchd/overrides.plist
+
+sudo /usr/libexec/PlistBuddy -c \
+    "Set :com.openssh.sshd:Disabled false" \
+    /var/db/launchd.db/com.apple.launchd/overrides.plist
+
+sudo /usr/libexec/PlistBuddy -c \
+    "Set :com.apple.smbd:Disabled false" \
+    /var/db/launchd.db/com.apple.launchd/overrides.plist
+
+sudo /usr/libexec/PlistBuddy -c \
+    "Set :com.apple.AppleFileServer:Disabled false" \
+    /var/db/launchd.db/com.apple.launchd/overrides.plist
 
 ################################################################################
 # Kill affected applications                                                   #
