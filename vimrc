@@ -18,7 +18,7 @@ let g:airline_powerline_fonts = 1
 execute pathogen#infect()
 filetype plugin indent on
 set background=dark
-colorscheme solarized
+colorscheme jellybeans
 
 " Highlight characters past column 80.
 highlight OverLength ctermbg=red ctermfg=white guibg=#592929

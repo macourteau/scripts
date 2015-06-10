@@ -1,18 +1,31 @@
 #!/bin/bash -eu
 
+INSTALL_PROFILE=1
+while (( "$#" )); do
+  case "$1" in
+    "--no_profile")
+      INSTALL_PROFILE=0
+      ;;
+    *)
+      echo "error: unrecognized argument: $1" >&2
+      exit 1
+  esac
+  shift
+done
+
 readonly script=$(basename $0)
 
 # Save the current git user name/email.
-git_user_name=$(git config --global user.name || echo -n)
 git_user_email=$(git config --global user.email || echo -n)
+git_user_name=$(git config --global user.name || echo -n)
 
 # Read-in the variables if they weren't already set.
-if [[ "x${git_user_name}" == "x" ]]; then
-  read -p "${script}: git user's full name: " git_user_name
-fi
-
 if [[ "x${git_user_email}" == "x" ]]; then
   read -p "${script}: git user's email: " git_user_email
+fi
+
+if [[ "x${git_user_name}" == "x" ]]; then
+  read -p "${script}: git user's full name: " git_user_name
 fi
 
 # Create the .ssh directory with the right permissions.
@@ -45,8 +58,10 @@ install-dotfile tmux.conf
 
 install-binary ssh-tmux
 
-install-dotfile profile
-mkdir -p "${HOME}/.profile.d"
+if [[ ${INSTALL_PROFILE} -eq 1 ]]; then
+  install-dotfile profile
+  mkdir -p "${HOME}/.profile.d"
+fi
 
 # Don't overwrite .ssh/config if it's already there, but otherwise, install our
 # custom .ssh/config file.
