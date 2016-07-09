@@ -14,3 +14,4 @@ Brd.CommandPopup.Grid.1 = "Placement_mm_05_025;mm 0.5 1 Lines On mm alt mm 0.25 
 Brd.CommandPopup.Grid.2 = "Routing_6mil;mil 6 1 Lines On mil alt mil 1 mil"
 Brd.CommandPopup.Grid.3 = "Routing_7mil;mil 7 1 Lines On mil alt mil 1 mil"
 Brd.CommandPopup.Grid.4 = "Routing_10mil;mil 10 1 Lines On mil alt mil 5 mil"
+Lbr.CommandPopup.Grid.1 = "gridmm;mm 0.5 1 Lines On mm alt mm 0.25 mm"
