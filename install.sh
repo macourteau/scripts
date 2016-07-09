@@ -43,6 +43,14 @@ function install-dotfile() {
   echo "done."
 }
 
+function append-to-dotfile() {
+  target="${HOME}/.$1"
+  echo -n "${script}: append $1 to \"${target}\"... "
+  cat "$1" >> "${target}"
+  chmod 644 "${target}"
+  echo "done."
+}
+
 # Installs an executable file to the user's $HOME/bin directory.
 function install-binary() {
   target="${HOME}/bin/$1"
@@ -78,6 +86,10 @@ fi
 install-dotfile gitconfig
 git config --global user.name "${git_user_name}"
 git config --global user.email "${git_user_email}"
+
+if [[ -f "${HOME}/.eaglerc" ]]; then
+  append-to-dotfile eaglerc
+fi
 
 # Pathogen for vim.
 mkdir -p "${HOME}/.vim/autoload" "${HOME}/.vim/bundle" "${HOME}/.vim/plugin"
