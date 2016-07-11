@@ -14,6 +14,7 @@ while (( "$#" )); do
 done
 
 readonly script=$(basename $0)
+readonly script_dir=$(dirname $0)
 
 # Save the current git user name/email.
 git_user_email=$(git config --global user.email || echo -n)
@@ -88,7 +89,7 @@ git config --global user.name "${git_user_name}"
 git config --global user.email "${git_user_email}"
 
 if [[ -f "${HOME}/.eaglerc" ]]; then
-  append-to-dotfile eaglerc
+  python "${script_dir}/install-eaglerc.py"
 fi
 
 # Pathogen for vim.
