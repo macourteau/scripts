@@ -14,6 +14,7 @@ while (( "$#" )); do
 done
 
 readonly script=$(basename $0)
+readonly script_dir=$(dirname $0)
 
 # Save the current git user name/email.
 git_user_email=$(git config --global user.email || echo -n)
@@ -39,6 +40,14 @@ function install-dotfile() {
   target="${HOME}/.$1"
   echo -n "${script}: install $1 to \"${target}\"... "
   cp "$1" "${target}"
+  chmod 644 "${target}"
+  echo "done."
+}
+
+function append-to-dotfile() {
+  target="${HOME}/.$1"
+  echo -n "${script}: append $1 to \"${target}\"... "
+  cat "$1" >> "${target}"
   chmod 644 "${target}"
   echo "done."
 }
@@ -78,6 +87,10 @@ fi
 install-dotfile gitconfig
 git config --global user.name "${git_user_name}"
 git config --global user.email "${git_user_email}"
+
+if [[ -f "${HOME}/.eaglerc" ]]; then
+  python "${script_dir}/install-eaglerc.py"
+fi
 
 # Pathogen for vim.
 mkdir -p "${HOME}/.vim/autoload" "${HOME}/.vim/bundle" "${HOME}/.vim/plugin"

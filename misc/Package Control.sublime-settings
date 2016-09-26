@@ -1,0 +1,31 @@
+{
+  "installed_packages":
+  [
+    "AlignTab",
+    "ARM Assembly",
+    "ColorPicker",
+    "CTags",
+    "Dayle Rees Color Schemes",
+    "Django",
+    "Git",
+    "GraphvizPreview",
+    "Lua Dev",
+    "OpenScad",
+    "Package Control",
+    "Puppet",
+    "Puppet Syntax checking",
+    "SideBarEnhancements",
+    "SideBarGit",
+    "Solarized Color Scheme",
+    "Stylus",
+    "sublime-vhdl",
+    "SyncedSideBar",
+    "Theme - Flatland",
+    "Theme - Soda",
+    "Theme - Spacegray"
+  ],
+  "repositories":
+  [
+    "https://github.com/yangsu/sublime-vhdl"
+  ]
+}

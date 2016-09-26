@@ -1,0 +1,3 @@
+Place "Package Control.sublime-settings" into Packages/Users, and start Sublime.
+
+All packages should install automatically.
