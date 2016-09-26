@@ -7,10 +7,12 @@ if [[ $# -ne 1 ]]; then
   exit 1
 fi
 
-# Ask for the administrator password upfront
+# TODO(macourteau): check that a USB key is mounted in /Volumes/Untitled
+
+# Ask for the administrator password upfront.
 sudo -v
 
-# Keep-alive: update existing `sudo` time stamp until we're finished
+# Keep-alive: update existing |sudo| timestamp until we're finished.
 while true
 do
   sudo -n true
@@ -47,4 +49,4 @@ sudo cp -a \
 # Eject the InstallESD.dmg image.
 sudo hdiutil detach /Volumes/OS\ X\ Install\ ESD
 
-echo "All done. Eject the USB key before unplugging it!"
+echo "All done! Don't forget to eject the USB key before unplugging it."
