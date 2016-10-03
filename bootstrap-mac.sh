@@ -458,6 +458,13 @@ sudo /usr/libexec/PlistBuddy -c \
 #    /var/db/launchd.db/com.apple.launchd/overrides.plist
 
 ################################################################################
+# Photos                                                                       #
+################################################################################
+
+# Prevent Photos from opening automatically when a device is connected.
+defaults write com.apple.ImageCapture disableHotPlug -bool true
+
+################################################################################
 # Kill affected applications                                                   #
 ################################################################################
 
