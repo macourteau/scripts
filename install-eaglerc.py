@@ -24,10 +24,13 @@ def sort_order(lhs, rhs):
   """
   lhs_key = lhs.split('=')[0].strip()
   rhs_key = rhs.split('=')[0].strip()
-  if STRIP_NUMBER_RE.sub(r'\1', lhs_key) == STRIP_NUMBER_RE.sub(r'\1', rhs_key):
-    lhs_number = int(EXTRACT_NUMBER_RE.sub(r'\1', lhs_key))
-    rhs_number = int(EXTRACT_NUMBER_RE.sub(r'\1', rhs_key))
-    return cmp(lhs_number, rhs_number)
+  try:
+    if STRIP_NUMBER_RE.sub(r'\1', lhs_key) == STRIP_NUMBER_RE.sub(r'\1', rhs_key):
+      lhs_number = int(EXTRACT_NUMBER_RE.sub(r'\1', lhs_key))
+      rhs_number = int(EXTRACT_NUMBER_RE.sub(r'\1', rhs_key))
+      return cmp(lhs_number, rhs_number)
+  except ValueError:
+    pass
   return cmp(lhs, rhs)
 
 
@@ -42,7 +45,10 @@ def main(argv):
     for line in lines:
       path, value = line.split('=')
       key = STRIP_NUMBER_RE.sub(r'\1', path.strip())
-      paths.add(key)
+      if key.strip() != path.strip():
+        paths.add(re.escape(key) + r'\.[0-9]+')
+      else:
+        paths.add(re.escape(key))
 
     # Get the correct path to the eaglerc file.
     if os.name == 'posix':
@@ -53,8 +59,7 @@ def main(argv):
     print 'Target file: "%s"' % target_file
 
     # Generate a regular expression to match the lines that need to be replaced.
-    strip_line_re = re.compile(
-        '^[ ]*(%s)' % '|'.join(re.escape(path) + r'\.[0-9]+' for path in paths))
+    strip_line_re = re.compile('^[ ]*(%s)' % '|'.join(paths))
 
     # Load the target file, but skip the lines that will be replaced.
     new_lines = []
