@@ -200,9 +200,9 @@ defaults write com.apple.finder OpenWindowForNewRemovableDisk -bool true
 #    ~/Library/Preferences/com.apple.recentitems.plist
 
 # Calculate all sizes.
-/usr/libexec/PlistBuddy -c \
-    "Set :StandardViewSettings:ExtendedListViewSettings:calculateAllSizes bool true" \
-    ~/Library/Preferences/com.apple.finder.plist
+#/usr/libexec/PlistBuddy -c \
+#    "Set :StandardViewSettings:ExtendedListViewSettings:calculateAllSizes bool true" \
+#    ~/Library/Preferences/com.apple.finder.plist
 /usr/libexec/PlistBuddy -c \
     "Set :StandardViewSettings:ListViewSettings:calculateAllSizes bool true" \
     ~/Library/Preferences/com.apple.finder.plist
