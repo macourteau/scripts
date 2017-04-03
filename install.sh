@@ -88,6 +88,9 @@ install-dotfile gitconfig
 git config --global user.name "${git_user_name}"
 git config --global user.email "${git_user_email}"
 
+install-dotfile gitignore
+git config --global core.excludesfile "${HOME}/.gitignore"
+
 if [[ -f "${HOME}/.eaglerc" ]]; then
   python "${script_dir}/install-eaglerc.py"
 fi
