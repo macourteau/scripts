@@ -1,4 +1,4 @@
-# Sublime Text plugins for Chromium
+# Sublime Text plugins for Chromium development
 My collection of useful Sublime Text plugins for Chromium development. Tested
 to work on a Mac -- pull requests welcome if they don't work on other platforms.
 
