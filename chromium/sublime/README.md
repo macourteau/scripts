@@ -7,8 +7,8 @@ To install on a Mac:
 $ ./install_mac.sh
 ```
 
-You can then configure shortcuts to use these scripts (in Sublime > Preferences
- > Key Bindings). Suggested bindings:
+You can then configure shortcuts to use these scripts (in Sublime >
+Preferences > Key Bindings). Suggested bindings:
 ```
 [
   { "keys": ["super+shift+s"], "command": "chromium_search" },
