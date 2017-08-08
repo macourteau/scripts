@@ -65,7 +65,11 @@ class OpenChangedFilesInNewWindowCommand(sublime_plugin.WindowCommand):
       print('No files to open!')
       return
 
+    current_project_data = sublime.active_window().project_data()
+
     root_directory = self.get_root_directory_()
     sublime.run_command('new_window')
+    window = sublime.active_window()
+    window.set_project_data(current_project_data)
     for item in items:
-      sublime.active_window().open_file(os.path.join(root_directory, item))
+      window.open_file(os.path.join(root_directory, item))
