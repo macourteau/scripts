@@ -13,5 +13,6 @@ Preferences > Key Bindings). Suggested bindings:
 [
   { "keys": ["super+shift+s"], "command": "chromium_search" },
   { "keys": ["super+shift+o"], "command": "find_owners" },
+  { "keys": ["super+shift+d"], "command": "open_changed_files_in_new_window" },
 ]
 ```
