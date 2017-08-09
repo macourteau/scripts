@@ -73,3 +73,4 @@ class OpenChangedFilesInNewWindowCommand(sublime_plugin.WindowCommand):
     window.set_project_data(current_project_data)
     for item in items:
       window.open_file(os.path.join(root_directory, item))
+    window.focus_sheet(window.sheets()[0])
