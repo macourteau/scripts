@@ -33,8 +33,7 @@ class GoToFileCommand(sublime_plugin.TextCommand):
     for folder in self.view.window().folders():
       potential_path = os.path.join(folder, file_path)
       if os.path.exists(potential_path):
-        sublime.run_command('new_window')
-        sublime.active_window().open_file(potential_path)
+        self.view.window().open_file(potential_path, sublime.TRANSIENT)
         return
 
   def is_enabled(self):
