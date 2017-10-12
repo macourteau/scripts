@@ -28,7 +28,7 @@ readonly src_hash_result=$(md5 "${src_path}")
 readonly src_hash=${src_hash_result##*= }
 
 # Copy the file over to the remote host.
-scp -p "${src_path}" "${remote_string}" > /dev/null
+scp -p "${src_path}" "${remote_string}"
 
 # Get the MD5 hash of the remote file.
 remote_md5_path=${remote_path%%${src_name}}
