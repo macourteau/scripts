@@ -1,6 +1,9 @@
 #!/bin/bash -eu
 # smv - "secure move": moves a file from the local machine to a remote machine.
 
+readonly SSH=${SSH:=ssh}
+readonly SCP=${SCP:=scp}
+
 if [[ $# -ne 2 ]]; then
   echo "usage: $(basename $0) <src> [user@]<host>:<dest>" 1>&2
   exit 1
@@ -28,13 +31,13 @@ readonly src_hash_result=$(md5 "${src_path}")
 readonly src_hash=${src_hash_result##*= }
 
 # Copy the file over to the remote host.
-scp -p "${src_path}" "${remote_string}"
+$SCP -p "${src_path}" "${remote_string}"
 
 # Get the MD5 hash of the remote file.
 remote_md5_path=${remote_path%%${src_name}}
 remote_md5_path=${remote_md5_path%%/}/${src_name}
 remote_md5_path=${remote_md5_path/\~/$HOME}
-readonly dest_hash_result=$(ssh ${remote_host} "md5 \"${remote_md5_path}\"")
+readonly dest_hash_result=$($SSH ${remote_host} "md5 \"${remote_md5_path}\"")
 readonly dest_hash=${dest_hash_result##*= }
 
 # Make sure the hashes match, and abort if they do not.
