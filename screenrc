@@ -1,7 +1,8 @@
-hardstatus alwayslastline '%{= kG}[ %{G}%H | %{=kw}%?%-Lw%?%{g}%n*%f%t%?(%u)%? %{g}]%{w}%?%+Lw%?%?%=%{g}[ %{K}%l %{g}][ %{B}%Y-%m-%d %{W    }%c %{g}]'
+hardstatus on
+hardstatus alwayslastline
+hardstatus string '%{= kg}[ %{G}%H %{g}| %{=kw}%?%-Lw%?%{g}%n*%f%t%?(%u)%? | %{Y}%S %{g}]%{w}%?%+Lw%?%?%=%{g}[ %{K}%l %{g}][ %{B}%Y-%m-%d %{W    }%c %{g}]'
 defscrollback 100000
 startup_message off
 autodetach on
 escape ^Bb    # Save Ctrl-A for bash
-deflogin on
 shell -$SHELL
