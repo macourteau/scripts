@@ -74,8 +74,10 @@ fi
 
 # Don't overwrite .ssh/config if it's already there, but otherwise, install our
 # custom .ssh/config file.
-if [[ ! -e "${HOME}/.ssh/config" ]]; then
-  cp -v sshconfig "${HOME}/.ssh/config"
+readonly SSH_CONFIG_FILE="${HOME}/.ssh/config"
+if [[ ! -e "${SSH_CONFIG_FILE}" ]]; then
+  cp -v sshconfig "${SSH_CONFIG_FILE}"
+  chmod 600 "${SSH_CONFIG_FILE}"
 fi
 
 install-dotfile screenrc
