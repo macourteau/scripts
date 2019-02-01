@@ -7,6 +7,9 @@ set autoindent
 set mouse=a
 set number
 
+set nobackup
+set nowritebackup
+
 set tabstop=2
 set shiftwidth=2
 set expandtab
