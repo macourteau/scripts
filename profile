@@ -22,6 +22,8 @@ alias egrep='egrep --color=auto'
 alias less='less -R'
 export LESS=FRSX
 
+alias vi='vim'
+
 # if running bash
 if [ -n "$BASH_VERSION" ]; then
   # include .bashrc if it exists
@@ -52,7 +54,7 @@ fi
 export PS4='$0($LINENO): '
 
 export LC_CTYPE=en_US.UTF-8
-export EDITOR=vi
+export EDITOR=vim
 
 # Better control of bash history.
 export HISTFILESIZE=1000000000
