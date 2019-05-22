@@ -6,6 +6,8 @@ endif
 set autoindent
 set mouse=a
 set number
+set nobackup
+set noundofile
 
 set tabstop=2
 set shiftwidth=2
