@@ -9,8 +9,6 @@ set number
 set nobackup
 set noundofile
 
-set nobackup
-
 set tabstop=2
 set shiftwidth=2
 set expandtab
