@@ -2,6 +2,14 @@ export PATH=/usr/local/sbin:/usr/local/bin:$HOME/bin:$PATH
 
 readonly darwin=$(expr $(uname -a | grep -i darwin | wc -l))
 
+# if running bash
+if [ -n "$BASH_VERSION" ]; then
+  # include .bashrc if it exists
+  if [ -f "${HOME}/.bashrc" ]; then
+    . "${HOME}/.bashrc"
+  fi
+fi
+
 # Setup an 'l' alias.
 if [[ $darwin -ne 0 ]]; then
   # Mac-specific aliases.
@@ -23,14 +31,6 @@ alias less='less -R'
 export LESS=FRSX
 
 alias vi='vim'
-
-# if running bash
-if [ -n "$BASH_VERSION" ]; then
-  # include .bashrc if it exists
-  if [ -f "${HOME}/.bashrc" ]; then
-    . "${HOME}/.bashrc"
-  fi
-fi
 
 # set PATH so it includes user's private bin if it exists
 if [ -d "${HOME}/bin" ] ; then
