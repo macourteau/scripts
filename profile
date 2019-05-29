@@ -40,7 +40,11 @@ fi
 # Setup the prompt.
 if [ "$PS1" ]; then
   if [ "$BASH" ]; then
-    PS1='\u@\h:\w$ '
+    if [ "$(id -u)" -eq 0 ]; then
+      PS1='\u@\h:\w# '
+    else
+      PS1='\u@\h:\w$ '
+    fi
   else
     if [ "$(id -u)" -eq 0 ]; then
       PS1='# '
