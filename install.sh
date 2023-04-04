@@ -104,35 +104,35 @@ curl -LSso "${HOME}/.vim/autoload/pathogen.vim" https://tpo.pe/pathogen.vim
 # Solarized color theme for vim.
 if [[ ! -e "${HOME}/.vim/bundle/vim-colors-solarized" ]]; then
   pushd "${HOME}/.vim/bundle"
-  git clone git://github.com/altercation/vim-colors-solarized.git
+  git clone https://github.com/altercation/vim-colors-solarized.git
   popd
 fi
 
 # Jellybeans color theme for vim.
 if [[ ! -e "${HOME}/.vim/bundle/jellybeans.vim" ]]; then
   pushd "${HOME}/.vim/bundle"
-  git clone git://github.com/nanotech/jellybeans.vim.git
+  git clone https://github.com/nanotech/jellybeans.vim.git
   popd
 fi
 
 # vim-airline status line for vim.
 if [[ ! -e "${HOME}/.vim/bundle/vim-airline" ]]; then
   pushd "${HOME}/.vim/bundle"
-  git clone git://github.com/bling/vim-airline.git
+  git clone https://github.com/bling/vim-airline.git
   popd
 fi
 
 # vim-fugitive for vim.
 if [[ ! -e "${HOME}/.vim/bundle/vim-fugitive" ]]; then
   pushd "${HOME}/.vim/bundle"
-  git clone git://github.com/tpope/vim-fugitive.git
+  git clone https://github.com/tpope/vim-fugitive.git
   popd
 fi
 
 # vim-bufferline for vim.
 if [[ ! -e "${HOME}/.vim/bundle/vim-bufferline" ]]; then
   pushd "${HOME}/.vim/bundle"
-  git clone git://github.com/bling/vim-bufferline.git
+  git clone https://github.com/bling/vim-bufferline.git
   popd
 fi
 
@@ -142,6 +142,6 @@ rm -f ${HOME}/.vim/plugin/autoclose.vim
 # auto-pairs for vim.
 if [[ ! -e "${HOME}/.vim/bundle/auto-pairs" ]]; then
   pushd "${HOME}/.vim/bundle"
-  git clone git://github.com/jiangmiao/auto-pairs.git
+  git clone https://github.com/jiangmiao/auto-pairs.git
   popd
 fi

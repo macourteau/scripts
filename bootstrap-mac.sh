@@ -103,9 +103,9 @@ defaults write -g com.apple.swipescrolldirection -bool false
 defaults write -g AppleKeyboardUIMode -int 3
 
 # Use scroll gesture with the Ctrl (^) modifier key to zoom
-defaults write com.apple.universalaccess closeViewPanningMode -int 0
-defaults write com.apple.universalaccess closeViewScrollWheelToggle -bool true
-defaults write com.apple.universalaccess closeViewSmoothImages -bool false
+#defaults write com.apple.universalaccess closeViewPanningMode -int 0
+#defaults write com.apple.universalaccess closeViewScrollWheelToggle -bool true
+#defaults write com.apple.universalaccess closeViewSmoothImages -bool false
 # Follow the keyboard focus while zoomed in
 #defaults write com.apple.universalaccess closeViewZoomFollowsFocus -bool true
 
