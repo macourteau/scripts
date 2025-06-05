@@ -23,6 +23,9 @@ fi
 readonly CLIENT_PUBLIC_KEY=$(cat "${SSH_PUBLIC_KEY_PATH}")
 readonly URL="${VAULT_BASE_URL}/v1/${VAULT_SSH_USER_MOUNT_PATH}/sign/${VAULT_SSH_USER_ROLE_NAME}"
 readonly WD=$(mktemp -d)
+
+trap "rm -rf \"${WD}\"" EXIT
+
 curl \
   --header "X-Vault-Token: $($VAULT_GET_TOKEN_COMMAND)" \
   --request POST \
