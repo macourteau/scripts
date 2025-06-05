@@ -1,0 +1,42 @@
+#!/bin/bash -e
+
+function fail() {
+  echo "$1" 1>&2
+  exit 1
+}
+
+if [[ -z "${VAULT_BASE_URL}" ]]; then
+  fail "missing VAULT_BASE_URL environment variable"
+fi
+
+if [[ -z "${VAULT_SSH_USER_MOUNT_PATH}" ]]; then
+  fail "missing VAULT_SSH_USER_MOUNT_PATH environment variable"
+fi
+
+readonly TRUSTED_USER_CA_KEYS_PATH=${1:-/etc/ssh/trusted-user-ca-keys.pem}
+
+readonly URL="${VAULT_BASE_URL}/v1/${VAULT_SSH_USER_MOUNT_PATH}/public_key"
+echo "Issuing request to ${URL} and saving to ${TRUSTED_USER_CA_KEYS_PATH}, will require sudo password"
+
+curl "${URL}" 2> /dev/null | sudo tee "${TRUSTED_USER_CA_KEYS_PATH}"
+sudo chmod 0640 "${TRUSTED_USER_CA_KEYS_PATH}"
+
+sudo sed -e 's/^TrustedUserCAKeys.*$//g' -i bak /etc/ssh/sshd_config
+echo "TrustedUserCAKeys ${TRUSTED_USER_CA_KEYS_PATH}" | sudo tee -a /etc/ssh/sshd_config
+
+if [[ "$(uname)" == "Darwin" ]]; then
+  sudo launchctl unload /System/Library/LaunchDaemons/ssh.plist
+  sudo launchctl load -w /System/Library/LaunchDaemons/ssh.plist
+elif [[ "$(uname)" == "Linux" ]]; then
+  # TODO: macourteau - verify that this works.
+  # Reference:
+  # https://www.cyberciti.biz/faq/how-do-i-restart-sshd-daemon-on-linux-or-unix/
+  sudo systemctl restart ssh # (or `sshd`)
+  # Could also be: `sudo systemctl restart ssh.service` (or `sshd.service`)
+else
+  echo
+  echo "need to restart the sshd server"
+  echo
+fi
+
+popd &> /dev/null

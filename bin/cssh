@@ -1,0 +1,39 @@
+#!/bin/bash -eu
+
+if [[ -z "${SSH_PUBLIC_KEY_PATH}" ]]; then
+  fail "missing SSH_PUBLIC_KEY_PATH environment variable"
+fi
+
+if [[ -z "${VAULT_BASE_URL}" ]]; then
+  fail "missing VAULT_BASE_URL environment variable"
+fi
+
+if [[ -z "${VAULT_SSH_USER_MOUNT_PATH}" ]]; then
+  fail "missing VAULT_SSH_USER_MOUNT_PATH environment variable"
+fi
+
+if [[ -z "${VAULT_SSH_USER_ROLE_NAME}" ]]; then
+  fail "missing VAULT_SSH_USER_ROLE_NAME environment variable"
+fi
+
+if [[ -z "${VAULT_GET_TOKEN_COMMAND}" ]]; then
+  fail "missing VAULT_GET_TOKEN_COMMAND environment variable"
+fi
+
+readonly CLIENT_PUBLIC_KEY=$(cat "${SSH_PUBLIC_KEY_PATH}")
+readonly URL="${VAULT_BASE_URL}/v1/${VAULT_SSH_USER_MOUNT_PATH}/sign/${VAULT_SSH_USER_ROLE_NAME}"
+readonly WD=$(mktemp -d)
+curl \
+  --header "X-Vault-Token: $($VAULT_GET_TOKEN_COMMAND)" \
+  --request POST \
+  --data "{\"public_key\":\"${CLIENT_PUBLIC_KEY}\"}" \
+  "${URL}" 2> /dev/null > "${WD}/response.json"
+
+if [[ "$(cat "${WD}/response.json" | jq -r .errors)" != "null" ]]; then
+  cat "${WD}/response.json" | jq .
+  exit 1
+fi
+
+cat "${WD}/response.json" | jq -r .data.signed_key > "${WD}/signed-cert.pub"
+
+ssh -i "${WD}/signed-cert.pub" -i "${SSH_PUBLIC_KEY_PATH}" "$@"

@@ -1,0 +1,76 @@
+#!/bin/bash -e
+
+function fail() {
+  echo "$1" 1>&2
+  exit 1
+}
+
+if [[ -z "${VAULT_TOKEN}" ]]; then
+  fail "missing VAULT_TOKEN environment variable"
+fi
+
+if [[ -z "${VAULT_BASE_URL}" ]]; then
+  fail "missing VAULT_BASE_URL environment variable"
+fi
+
+if [[ -z "${VAULT_SSH_HOST_MOUNT_PATH}" ]]; then
+  fail "missing VAULT_SSH_HOST_MOUNT_PATH environment variable"
+fi
+
+if [[ -z "${VAULT_SSH_HOST_ROLE_NAME}" ]]; then
+  fail "missing VAULT_SSH_HOST_ROLE_NAME environment variable"
+fi
+
+readonly HOST_KEY_PATH=${1:-/etc/ssh/ssh_host_rsa_key.pub}
+readonly TTL=${2:-87600h}
+
+if [[ ! -e "${HOST_KEY_PATH}" ]]; then
+  fail "missing host key at ${HOST_KEY_PATH}"
+fi
+
+readonly HOST_KEY=$(cat "${HOST_KEY_PATH}")
+
+readonly WD=$(mktemp -d)
+pushd "${WD}" &> /dev/null
+
+echo "Working in ${WD}"
+readonly URL="${VAULT_BASE_URL}/v1/${VAULT_SSH_HOST_MOUNT_PATH}/sign/${VAULT_SSH_HOST_ROLE_NAME}"
+echo "Issuing request to ${URL}"
+
+curl \
+  --header "X-Vault-Token: ${VAULT_TOKEN}" \
+  --request POST \
+  --data "{\"public_key\":\"${HOST_KEY}\",\"cert_type\":\"host\",\"ttl\":\"${TTL}\"}" \
+  "${URL}" 2> /dev/null > response.json
+
+if [[ "$(cat response.json | jq -r .errors)" != "null" ]]; then
+  cat response.json | jq .
+  exit 1
+fi
+
+readonly HOST_PRIVATE_KEY_PATH=${HOST_KEY_PATH%.pub}
+readonly CERT_PATH="${HOST_PRIVATE_KEY_PATH}-cert.pub"
+echo "Writing cert to ${CERT_PATH}, will require sudo password"
+cat response.json | jq -r .data.signed_key | sudo tee "${CERT_PATH}"
+sudo chmod 0640 "${CERT_PATH}"
+
+sudo sed -e 's/^HostKey.*$//g' -e 's/^HostCertificate.*$//g' -i bak /etc/ssh/sshd_config
+echo "HostKey ${HOST_PRIVATE_KEY_PATH}" | sudo tee -a /etc/ssh/sshd_config
+echo "HostCertificate ${CERT_PATH}" | sudo tee -a /etc/ssh/sshd_config
+
+if [[ "$(uname)" == "Darwin" ]]; then
+  sudo launchctl unload /System/Library/LaunchDaemons/ssh.plist
+  sudo launchctl load -w /System/Library/LaunchDaemons/ssh.plist
+elif [[ "$(uname)" == "Linux" ]]; then
+  # TODO: macourteau - verify that this works.
+  # Reference:
+  # https://www.cyberciti.biz/faq/how-do-i-restart-sshd-daemon-on-linux-or-unix/
+  sudo systemctl restart ssh # (or `sshd`)
+  # Could also be: `sudo systemctl restart ssh.service` (or `sshd.service`)
+else
+  echo
+  echo "need to restart the sshd server"
+  echo
+fi
+
+popd &> /dev/null
