@@ -36,4 +36,4 @@ fi
 
 cat "${WD}/response.json" | jq -r .data.signed_key > "${WD}/signed-cert.pub"
 
-ssh -i "${WD}/signed-cert.pub" -i "${SSH_PUBLIC_KEY_PATH}" "$@"
+ssh -i "${WD}/signed-cert.pub" -i "${SSH_PUBLIC_KEY_PATH%.pub}" "$@"
