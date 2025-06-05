@@ -23,6 +23,7 @@ fi
 readonly CLIENT_PUBLIC_KEY=$(cat "${SSH_PUBLIC_KEY_PATH}")
 readonly URL="${VAULT_BASE_URL}/v1/${VAULT_SSH_USER_MOUNT_PATH}/sign/${VAULT_SSH_USER_ROLE_NAME}"
 readonly WD=$(mktemp -d)
+readonly SSH=${SSH:-ssh}
 
 trap "rm -rf \"${WD}\"" EXIT
 
@@ -39,4 +40,4 @@ fi
 
 cat "${WD}/response.json" | jq -r .data.signed_key > "${WD}/signed-cert.pub"
 
-ssh -i "${WD}/signed-cert.pub" -i "${SSH_PUBLIC_KEY_PATH%.pub}" "$@"
+${SSH} -i "${WD}/signed-cert.pub" -i "${SSH_PUBLIC_KEY_PATH%.pub}" "$@"
