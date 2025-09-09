@@ -1,6 +1,11 @@
-hardstatus on
+term screen-256color
+termcapinfo xterm* 'Co#256:AB=\E[48;5;%dm:AF=\E[38;5;%dm'
+defbce on
+truecolor on
+
+hardstatus off
 hardstatus alwayslastline
-hardstatus string '%{= kg}[ %{G}%H %{g}| %{=kw}%?%-Lw%?%{g}%n*%f%t%?(%u)%? | %{Y}%S %{g}]%{w}%?%+Lw%?%?%=%{g}[ %{K}%l %{g}][ %{B}%Y-%m-%d %{W    }%c %{g}]'
+hardstatus string '%{#00ff00;#000000}[ %{#00ff00;#000000}%H %{#00ff00;#000000}| %{#ffffff;#000000}%?%-Lw%?%{#00ff00;#000000}%n*%f%t%?(%u)%? | %{#ffff00;#000000}%S %{#00ff00;#000000}]%{#ffffff;#000000}%?%+Lw%?%=%{#00ff00;#000000}[ %{#808080;#000000}%l %{#00ff00;#000000}][ %{#0000ff;#000000}%Y-%m-%d %{#ffffff;#000000}%c %{#00ff00;#000000}]'
 defscrollback 100000
 startup_message off
 autodetach on
