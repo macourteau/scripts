@@ -1,0 +1,223 @@
+#!/bin/bash -eu
+
+# ensure-cert: Ensure a valid signed SSH certificate exists, fetching from Vault if needed.
+#
+# Usage: ensure-cert [--quiet]
+#
+# Without --quiet, outputs two lines:
+#   1. Path to the certificate
+#   2. Path to the private key
+#
+# With --quiet, outputs nothing (for use with SSH Match exec).
+# Exit code 0 indicates success (valid cert exists or was fetched).
+#
+# Required environment variables:
+#   SSH_PUBLIC_KEY_PATH          - Path to your SSH public key
+#   VAULT_BASE_URL               - Vault server URL (e.g., https://vault.example.com)
+#   VAULT_SSH_USER_MOUNT_PATH    - Vault mount path for user certs (e.g., ssh-client-signer)
+#   VAULT_SSH_USER_ROLE_NAME     - Vault role name (e.g., default)
+#   VAULT_GET_TOKEN_COMMAND      - Command to get Vault token (e.g., "cat ~/.vault-token")
+#
+# Optional environment variables:
+#   CSSH_CACHE_DIR               - Certificate cache directory (default: ~/.cache/cssh)
+#   CSSH_BUFFER_SECONDS          - Buffer time before expiry to fetch new cert (default: 60)
+
+fail() {
+  echo "error: $*" >&2
+  exit 1
+}
+
+# Parse arguments (bash 3.2 compatible)
+QUIET=0
+for arg in "$@"; do
+  case "$arg" in
+    --quiet|-q)
+      QUIET=1
+      ;;
+    --help|-h)
+      head -25 "$0" | tail -23
+      exit 0
+      ;;
+    *)
+      fail "unknown argument: $arg"
+      ;;
+  esac
+done
+
+# Validate required environment variables
+if [[ -z "${SSH_PUBLIC_KEY_PATH:-}" ]]; then
+  fail "missing SSH_PUBLIC_KEY_PATH environment variable"
+fi
+
+if [[ -z "${VAULT_BASE_URL:-}" ]]; then
+  fail "missing VAULT_BASE_URL environment variable"
+fi
+
+if [[ -z "${VAULT_SSH_USER_MOUNT_PATH:-}" ]]; then
+  fail "missing VAULT_SSH_USER_MOUNT_PATH environment variable"
+fi
+
+if [[ -z "${VAULT_SSH_USER_ROLE_NAME:-}" ]]; then
+  fail "missing VAULT_SSH_USER_ROLE_NAME environment variable"
+fi
+
+if [[ -z "${VAULT_GET_TOKEN_COMMAND:-}" ]]; then
+  fail "missing VAULT_GET_TOKEN_COMMAND environment variable"
+fi
+
+if [[ ! -f "${SSH_PUBLIC_KEY_PATH}" ]]; then
+  fail "SSH public key not found: ${SSH_PUBLIC_KEY_PATH}"
+fi
+
+# Configuration
+CACHE_DIR="${CSSH_CACHE_DIR:-${HOME}/.cache/cssh}"
+readonly CACHE_DIR
+BUFFER_SECONDS="${CSSH_BUFFER_SECONDS:-60}"
+readonly BUFFER_SECONDS
+
+# Derive paths from public key
+KEY_BASENAME=$(basename "${SSH_PUBLIC_KEY_PATH}")
+KEY_NAME="${KEY_BASENAME%.pub}"
+readonly KEY_NAME
+CACHED_CERT="${CACHE_DIR}/${KEY_NAME}-cert.pub"
+readonly CACHED_CERT
+PRIVATE_KEY="${SSH_PUBLIC_KEY_PATH%.pub}"
+readonly PRIVATE_KEY
+
+# Check if certificate is valid (not expired with buffer)
+is_cert_valid() {
+  local cert_file="$1"
+
+  if [[ ! -f "${cert_file}" ]]; then
+    return 1
+  fi
+
+  # Parse certificate to get expiry time
+  local cert_info
+  if ! cert_info=$(ssh-keygen -L -f "${cert_file}" 2>/dev/null); then
+    return 1
+  fi
+
+  # Extract the "Valid: from ... to ..." line
+  local valid_line
+  valid_line=$(echo "${cert_info}" | grep "Valid:" | head -1) || return 1
+
+  if [[ -z "${valid_line}" ]]; then
+    return 1
+  fi
+
+  # Extract the "to" date - handles formats like:
+  #   "Valid: from 2026-01-19T09:00:00 to 2026-01-19T21:00:00"
+  #   "Valid: from 2026-01-19T09:00:00Z to 2026-01-19T21:00:00Z"
+  local expiry_str
+  expiry_str=$(echo "${valid_line}" | sed 's/.*to //' | sed 's/[[:space:]].*//' | sed 's/Z$//')
+
+  if [[ -z "${expiry_str}" ]]; then
+    return 1
+  fi
+
+  # Convert expiry to epoch seconds
+  # Try macOS format first, then Linux format
+  local expiry_epoch
+  if ! expiry_epoch=$(date -j -f "%Y-%m-%dT%H:%M:%S" "${expiry_str}" "+%s" 2>/dev/null); then
+    if ! expiry_epoch=$(date -d "${expiry_str}" "+%s" 2>/dev/null); then
+      # Can't parse date - assume invalid, will fetch new cert
+      return 1
+    fi
+  fi
+
+  # Get current time
+  local now_epoch
+  now_epoch=$(date "+%s")
+
+  # Check if certificate is still valid with buffer
+  local adjusted_expiry=$((expiry_epoch - BUFFER_SECONDS))
+  if [[ ${now_epoch} -lt ${adjusted_expiry} ]]; then
+    return 0
+  fi
+
+  return 1
+}
+
+# Fetch a new certificate from Vault
+fetch_cert() {
+  local client_public_key
+  client_public_key=$(cat "${SSH_PUBLIC_KEY_PATH}")
+
+  local url="${VAULT_BASE_URL}/v1/${VAULT_SSH_USER_MOUNT_PATH}/sign/${VAULT_SSH_USER_ROLE_NAME}"
+
+  # Create temp file for response
+  local tmp_response
+  tmp_response=$(mktemp)
+
+  # Ensure cleanup on exit from this function
+  cleanup_fetch() {
+    rm -f "${tmp_response}"
+  }
+  trap cleanup_fetch RETURN
+
+  # Get Vault token
+  local vault_token
+  if ! vault_token=$(eval "${VAULT_GET_TOKEN_COMMAND}" 2>/dev/null); then
+    fail "failed to get Vault token"
+  fi
+
+  # Request signed certificate
+  local http_code
+  http_code=$(curl \
+    --silent \
+    --output "${tmp_response}" \
+    --write-out "%{http_code}" \
+    --header "X-Vault-Token: ${vault_token}" \
+    --request POST \
+    --data "{\"public_key\":\"${client_public_key}\"}" \
+    "${url}")
+
+  if [[ "${http_code}" != "200" ]]; then
+    if [[ -f "${tmp_response}" ]] && [[ -s "${tmp_response}" ]]; then
+      local errors
+      errors=$(jq -r '.errors // empty' "${tmp_response}" 2>/dev/null || cat "${tmp_response}")
+      fail "Vault returned HTTP ${http_code}: ${errors}"
+    else
+      fail "Vault returned HTTP ${http_code}"
+    fi
+  fi
+
+  # Check for errors in response
+  local errors
+  errors=$(jq -r '.errors // empty' "${tmp_response}" 2>/dev/null)
+  if [[ -n "${errors}" ]]; then
+    fail "Vault error: ${errors}"
+  fi
+
+  # Extract signed certificate
+  local signed_key
+  signed_key=$(jq -r '.data.signed_key // empty' "${tmp_response}")
+  if [[ -z "${signed_key}" ]]; then
+    fail "no signed_key in Vault response"
+  fi
+
+  # Ensure cache directory exists with secure permissions
+  if [[ ! -d "${CACHE_DIR}" ]]; then
+    mkdir -p "${CACHE_DIR}"
+    chmod 700 "${CACHE_DIR}"
+  fi
+
+  # Write certificate atomically
+  local tmp_cert
+  tmp_cert=$(mktemp "${CACHE_DIR}/cert.XXXXXX")
+  echo "${signed_key}" > "${tmp_cert}"
+  chmod 600 "${tmp_cert}"
+  mv "${tmp_cert}" "${CACHED_CERT}"
+}
+
+# Main logic
+if ! is_cert_valid "${CACHED_CERT}"; then
+  fetch_cert
+fi
+
+# Output paths (unless quiet mode)
+if [[ "${QUIET}" -eq 0 ]]; then
+  echo "${CACHED_CERT}"
+  echo "${PRIVATE_KEY}"
+fi

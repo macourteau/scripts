@@ -1,0 +1,386 @@
+#!/bin/bash -eu
+
+# config: Manage SSH config entries for Vault-signed certificates
+#
+# Usage:
+#   config add [--pattern PATTERN] [--ssh-config PATH]
+#   config list [--ssh-config PATH]
+#   config remove --pattern PATTERN [--ssh-config PATH]
+#
+# Commands:
+#   add      Add a host pattern to SSH config (interactive if --pattern not given)
+#   list     List all cssh-managed host patterns
+#   remove   Remove a host pattern from SSH config
+#
+# Options:
+#   --pattern PATTERN    Host pattern (e.g., "*.example.com")
+#   --ssh-config PATH    SSH config file (default: $CSSH_SSH_CONFIG or ~/.ssh/config)
+
+HERE=$(cd "$(dirname "$0")" && pwd)
+readonly HERE
+
+# Colors (only if terminal supports them)
+if [[ -t 1 ]]; then
+  RED='\033[0;31m'
+  GREEN='\033[0;32m'
+  YELLOW='\033[0;33m'
+  NC='\033[0m'
+else
+  RED=''
+  GREEN=''
+  YELLOW=''
+  NC=''
+fi
+
+fail() {
+  echo -e "${RED}error:${NC} $*" >&2
+  exit 1
+}
+
+warn() {
+  echo -e "${YELLOW}warning:${NC} $*" >&2
+}
+
+usage() {
+  head -18 "$0" | tail -16
+  exit "${1:-0}"
+}
+
+# Get SSH config path (argument > env var > default)
+get_ssh_config_path() {
+  local arg_path="$1"
+
+  if [[ -n "${arg_path}" ]]; then
+    echo "${arg_path}"
+  elif [[ -n "${CSSH_SSH_CONFIG:-}" ]]; then
+    echo "${CSSH_SSH_CONFIG}"
+  else
+    echo "${HOME}/.ssh/config"
+  fi
+}
+
+# Ensure SSH config file and directory exist with correct permissions
+ensure_ssh_config() {
+  local config_path="$1"
+  local ssh_dir
+  ssh_dir=$(dirname "${config_path}")
+
+  if [[ ! -d "${ssh_dir}" ]]; then
+    echo "Creating ${ssh_dir}"
+    mkdir -p "${ssh_dir}"
+    chmod 700 "${ssh_dir}"
+  fi
+
+  if [[ ! -f "${config_path}" ]]; then
+    echo "Creating ${config_path}"
+    touch "${config_path}"
+    chmod 600 "${config_path}"
+  fi
+}
+
+# Check if a pattern already exists in SSH config
+pattern_exists() {
+  local config_path="$1"
+  local pattern="$2"
+
+  if [[ ! -f "${config_path}" ]]; then
+    return 1
+  fi
+
+  grep -q "^# cssh-managed: ${pattern}\$" "${config_path}" 2>/dev/null
+}
+
+# Prompt for yes/no
+confirm() {
+  local prompt_text="$1"
+  local default="${2:-n}"
+
+  local yn_hint
+  if [[ "${default}" == "y" ]]; then
+    yn_hint="[Y/n]"
+  else
+    yn_hint="[y/N]"
+  fi
+
+  local response
+  read -r -p "${prompt_text} ${yn_hint}: " response
+  response="${response:-${default}}"
+
+  case "${response}" in
+    [yY]|[yY][eE][sS]) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# Add command
+cmd_add() {
+  local config_path=""
+  local pattern=""
+
+  # Parse arguments
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --pattern)
+        pattern="$2"
+        shift 2
+        ;;
+      --ssh-config)
+        config_path="$2"
+        shift 2
+        ;;
+      --help|-h)
+        usage 0
+        ;;
+      *)
+        fail "unknown option: $1"
+        ;;
+    esac
+  done
+
+  config_path=$(get_ssh_config_path "${config_path}")
+
+  # Validate environment
+  if [[ -z "${SSH_PUBLIC_KEY_PATH:-}" ]]; then
+    fail "SSH_PUBLIC_KEY_PATH not set. Run 'install' first or source ~/.profile.d/cssh"
+  fi
+
+  # Interactive mode if pattern not provided
+  if [[ -z "${pattern}" ]]; then
+    read -r -p "Host pattern (e.g., *.example.com): " pattern
+  fi
+
+  if [[ -z "${pattern}" ]]; then
+    fail "host pattern is required"
+  fi
+
+  # Check for duplicate
+  if pattern_exists "${config_path}" "${pattern}"; then
+    fail "pattern '${pattern}' already exists in ${config_path}"
+  fi
+
+  # Derive paths from environment
+  local key_basename
+  key_basename=$(basename "${SSH_PUBLIC_KEY_PATH}")
+  local key_name="${key_basename%.pub}"
+  local cache_dir="${CSSH_CACHE_DIR:-${HOME}/.cache/cssh}"
+  local cert_path="${cache_dir}/${key_name}-cert.pub"
+  local private_key="${SSH_PUBLIC_KEY_PATH%.pub}"
+  local ensure_cert_path="${HERE}/ensure-cert"
+
+  # Summary
+  echo
+  echo "Configuration summary:"
+  echo "  SSH config file:  ${config_path}"
+  echo "  Host pattern:     ${pattern}"
+  echo "  Certificate:      ${cert_path}"
+  echo "  Private key:      ${private_key}"
+  echo "  Match exec cmd:   ${ensure_cert_path} --quiet"
+  echo
+
+  if ! confirm "Add this configuration?"; then
+    echo "Aborted."
+    exit 0
+  fi
+
+  # Ensure config file exists
+  ensure_ssh_config "${config_path}"
+
+  # Append configuration block
+  cat >> "${config_path}" <<EOF
+
+# cssh-managed: ${pattern}
+Match host ${pattern} exec "${ensure_cert_path} --quiet"
+    CertificateFile ${cert_path}
+    IdentityFile ${private_key}
+    IdentitiesOnly yes
+EOF
+
+  echo -e "${GREEN}Added configuration for '${pattern}' to ${config_path}${NC}"
+}
+
+# List command
+cmd_list() {
+  local config_path=""
+
+  # Parse arguments
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --ssh-config)
+        config_path="$2"
+        shift 2
+        ;;
+      --help|-h)
+        usage 0
+        ;;
+      *)
+        fail "unknown option: $1"
+        ;;
+    esac
+  done
+
+  config_path=$(get_ssh_config_path "${config_path}")
+
+  if [[ ! -f "${config_path}" ]]; then
+    echo "No SSH config file found at ${config_path}"
+    exit 0
+  fi
+
+  local patterns
+  patterns=$(grep "^# cssh-managed:" "${config_path}" 2>/dev/null | sed 's/^# cssh-managed: //' || true)
+
+  if [[ -z "${patterns}" ]]; then
+    echo "No cssh-managed patterns found in ${config_path}"
+  else
+    echo "cssh-managed patterns in ${config_path}:"
+    echo "${patterns}" | while read -r p; do
+      echo "  ${p}"
+    done
+  fi
+}
+
+# Generate config with pattern removed (writes to tmp_file, does not modify original)
+generate_config_without_pattern() {
+  local config_path="$1"
+  local pattern="$2"
+  local tmp_file="$3"
+
+  # State machine to remove the block
+  # Block format:
+  #   # cssh-managed: PATTERN
+  #   Match host PATTERN exec "..."
+  #       Option1 value
+  #       Option2 value
+  #   (blank line or next block)
+  local in_block=0
+  local skip_blank=0
+
+  while IFS= read -r line || [[ -n "${line}" ]]; do
+    # Check if this is the start of our block
+    if [[ "${line}" == "# cssh-managed: ${pattern}" ]]; then
+      in_block=1
+      skip_blank=1
+      continue
+    fi
+
+    if [[ ${in_block} -eq 1 ]]; then
+      # Check if we've reached the end of the block
+      case "${line}" in
+        "# cssh-managed:"*|"Host "*|"Match "*)
+          # Start of a new block - we're done skipping
+          in_block=0
+          skip_blank=0
+          echo "${line}" >> "${tmp_file}"
+          ;;
+        "")
+          # Blank line - skip it if we just finished the block
+          if [[ ${skip_blank} -eq 1 ]]; then
+            skip_blank=0
+          else
+            echo "${line}" >> "${tmp_file}"
+          fi
+          ;;
+        "    "*)
+          # Indented line (part of block) - skip it
+          ;;
+        *)
+          # Non-indented, non-empty line - end of block
+          in_block=0
+          skip_blank=0
+          echo "${line}" >> "${tmp_file}"
+          ;;
+      esac
+    else
+      echo "${line}" >> "${tmp_file}"
+    fi
+  done < "${config_path}"
+}
+
+# Remove command
+cmd_remove() {
+  local config_path=""
+  local pattern=""
+
+  # Parse arguments
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --pattern)
+        pattern="$2"
+        shift 2
+        ;;
+      --ssh-config)
+        config_path="$2"
+        shift 2
+        ;;
+      --help|-h)
+        usage 0
+        ;;
+      *)
+        fail "unknown option: $1"
+        ;;
+    esac
+  done
+
+  config_path=$(get_ssh_config_path "${config_path}")
+
+  if [[ -z "${pattern}" ]]; then
+    fail "--pattern is required for remove command"
+  fi
+
+  if [[ ! -f "${config_path}" ]]; then
+    fail "SSH config file not found: ${config_path}"
+  fi
+
+  if ! pattern_exists "${config_path}" "${pattern}"; then
+    fail "pattern '${pattern}' not found in ${config_path}"
+  fi
+
+  # Create temp file for new config
+  local tmp_file
+  tmp_file=$(mktemp)
+  trap 'rm -f "${tmp_file}"' RETURN
+
+  # Generate new config without the pattern
+  generate_config_without_pattern "${config_path}" "${pattern}" "${tmp_file}"
+
+  # Show diff of what will be removed
+  echo "Changes to ${config_path}:"
+  echo
+  diff --color=auto -u "${config_path}" "${tmp_file}" || true
+  echo
+
+  if ! confirm "Apply these changes?"; then
+    echo "Aborted."
+    exit 0
+  fi
+
+  # Replace original file
+  cp "${tmp_file}" "${config_path}"
+  chmod 600 "${config_path}"
+
+  echo -e "${GREEN}Removed configuration for '${pattern}' from ${config_path}${NC}"
+}
+
+# Main
+case "${1:-}" in
+  add)
+    shift
+    cmd_add "$@"
+    ;;
+  list)
+    shift
+    cmd_list "$@"
+    ;;
+  remove)
+    shift
+    cmd_remove "$@"
+    ;;
+  --help|-h)
+    usage 0
+    ;;
+  "")
+    usage 1
+    ;;
+  *)
+    fail "unknown command: $1"
+    ;;
+esac

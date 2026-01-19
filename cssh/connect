@@ -1,0 +1,27 @@
+#!/bin/bash -eu
+
+# connect: One-off SSH connection using Vault-signed certificates
+#
+# Usage: connect [ssh-options] [user@]hostname [command]
+#
+# Use this script to:
+#   - Test that certificate fetching works before setting up SSH config
+#   - Connect to hosts not covered by SSH config patterns
+#   - Debug certificate issues
+#
+# For regular use, configure hosts via 'config add' so that standard
+# ssh/scp/rsync commands work automatically.
+#
+# Override the SSH binary with: SSH=/path/to/ssh connect ...
+
+HERE=$(cd "$(dirname "$0")" && pwd)
+readonly HERE
+
+# Get valid certificate paths
+paths=$("${HERE}/ensure-cert")
+CERT_PATH=$(echo "${paths}" | head -1)
+readonly CERT_PATH
+KEY_PATH=$(echo "${paths}" | tail -1)
+readonly KEY_PATH
+
+exec ${SSH:-ssh} -i "${CERT_PATH}" -i "${KEY_PATH}" "$@"

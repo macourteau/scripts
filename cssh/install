@@ -1,0 +1,251 @@
+#!/bin/bash -eu
+
+# install: Set up cssh (Vault-signed SSH certificates)
+#
+# This script:
+#   1. Checks for required dependencies
+#   2. Prompts for configuration values
+#   3. Writes configuration to ~/.profile.d/cssh
+#   4. Optionally adds a host pattern to SSH config
+#
+# Run this script on any machine where you want to use Vault-signed certificates.
+
+HERE=$(cd "$(dirname "$0")" && pwd)
+readonly HERE
+
+# Colors (only if terminal supports them)
+if [[ -t 1 ]]; then
+  RED='\033[0;31m'
+  GREEN='\033[0;32m'
+  YELLOW='\033[0;33m'
+  NC='\033[0m' # No Color
+else
+  RED=''
+  GREEN=''
+  YELLOW=''
+  NC=''
+fi
+
+info() {
+  echo -e "${GREEN}==>${NC} $*"
+}
+
+warn() {
+  echo -e "${YELLOW}warning:${NC} $*" >&2
+}
+
+fail() {
+  echo -e "${RED}error:${NC} $*" >&2
+  exit 1
+}
+
+# Check for a required command
+check_dependency() {
+  local cmd="$1"
+  local install_hint="$2"
+
+  if ! command -v "$cmd" >/dev/null 2>&1; then
+    echo -e "${RED}error:${NC} '$cmd' is required but not installed." >&2
+    echo "  ${install_hint}" >&2
+    return 1
+  fi
+  return 0
+}
+
+# Prompt for input with optional default value
+prompt() {
+  local var_name="$1"
+  local prompt_text="$2"
+  local default_value="${3:-}"
+
+  local input
+  if [[ -n "${default_value}" ]]; then
+    read -r -p "${prompt_text} [${default_value}]: " input
+    input="${input:-${default_value}}"
+  else
+    read -r -p "${prompt_text}: " input
+  fi
+
+  eval "${var_name}=\"\${input}\""
+}
+
+# Prompt for yes/no
+confirm() {
+  local prompt_text="$1"
+  local default="${2:-n}"
+
+  local yn_hint
+  if [[ "${default}" == "y" ]]; then
+    yn_hint="[Y/n]"
+  else
+    yn_hint="[y/N]"
+  fi
+
+  local response
+  read -r -p "${prompt_text} ${yn_hint}: " response
+  response="${response:-${default}}"
+
+  case "${response}" in
+    [yY]|[yY][eE][sS]) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# Main installation
+main() {
+  echo "cssh installer"
+  echo "=============="
+  echo
+  echo "This will configure Vault-signed SSH certificates on this machine."
+  echo
+
+  # Check dependencies
+  info "Checking dependencies..."
+  local deps_ok=1
+
+  check_dependency curl "Install via your package manager (e.g., brew install curl)" || deps_ok=0
+  check_dependency jq "Install via: brew install jq (macOS) or apt install jq (Linux)" || deps_ok=0
+  check_dependency ssh-keygen "Should be available with OpenSSH" || deps_ok=0
+
+  if [[ ${deps_ok} -eq 0 ]]; then
+    echo
+    fail "Please install missing dependencies and run this script again."
+  fi
+
+  echo "  All dependencies found."
+  echo
+
+  # Check if already configured
+  local profile_file="${HOME}/.profile.d/cssh"
+  if [[ -f "${profile_file}" ]]; then
+    warn "Existing configuration found at ${profile_file}"
+    if ! confirm "Overwrite existing configuration?"; then
+      echo "Aborted."
+      exit 0
+    fi
+    echo
+  fi
+
+  # Gather configuration
+  info "Configuration"
+  echo
+
+  # SSH public key path
+  local default_key=""
+  if [[ -f "${HOME}/.ssh/id_ed25519.pub" ]]; then
+    default_key="${HOME}/.ssh/id_ed25519.pub"
+  elif [[ -f "${HOME}/.ssh/id_rsa.pub" ]]; then
+    default_key="${HOME}/.ssh/id_rsa.pub"
+  fi
+
+  prompt SSH_PUBLIC_KEY_PATH "SSH public key path" "${default_key}"
+  if [[ ! -f "${SSH_PUBLIC_KEY_PATH}" ]]; then
+    fail "SSH public key not found: ${SSH_PUBLIC_KEY_PATH}"
+  fi
+
+  # Vault configuration
+  prompt VAULT_BASE_URL "Vault server URL (e.g., https://vault.example.com)"
+  if [[ -z "${VAULT_BASE_URL}" ]]; then
+    fail "Vault URL is required"
+  fi
+
+  prompt VAULT_SSH_USER_MOUNT_PATH "Vault SSH user mount path (e.g., ssh-client-signer)"
+  if [[ -z "${VAULT_SSH_USER_MOUNT_PATH}" ]]; then
+    fail "Vault mount path is required"
+  fi
+
+  prompt VAULT_SSH_USER_ROLE_NAME "Vault SSH user role name" "default"
+  if [[ -z "${VAULT_SSH_USER_ROLE_NAME}" ]]; then
+    fail "Vault role name is required"
+  fi
+
+  prompt VAULT_GET_TOKEN_COMMAND "Command to get Vault token (e.g., cat ~/.vault-token)"
+  if [[ -z "${VAULT_GET_TOKEN_COMMAND}" ]]; then
+    fail "Vault token command is required"
+  fi
+
+  # SSH config path (optional, for non-default paths)
+  echo
+  prompt CSSH_SSH_CONFIG "SSH config file path" "${HOME}/.ssh/config"
+
+  echo
+
+  # Summary
+  info "Configuration summary"
+  echo "  SSH public key:      ${SSH_PUBLIC_KEY_PATH}"
+  echo "  Vault URL:           ${VAULT_BASE_URL}"
+  echo "  Vault mount path:    ${VAULT_SSH_USER_MOUNT_PATH}"
+  echo "  Vault role:          ${VAULT_SSH_USER_ROLE_NAME}"
+  echo "  Token command:       ${VAULT_GET_TOKEN_COMMAND}"
+  echo "  SSH config:          ${CSSH_SSH_CONFIG}"
+  echo "  Scripts directory:   ${HERE}"
+  echo
+
+  if ! confirm "Save this configuration?"; then
+    echo "Aborted."
+    exit 0
+  fi
+
+  # Ensure ~/.profile.d exists
+  if [[ ! -d "${HOME}/.profile.d" ]]; then
+    info "Creating ${HOME}/.profile.d"
+    mkdir -p "${HOME}/.profile.d"
+  fi
+
+  # Write configuration
+  info "Writing configuration to ${profile_file}"
+
+  cat > "${profile_file}" <<EOF
+# cssh configuration - Vault-signed SSH certificates
+# Generated by: ${HERE}/install
+# Date: $(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+export SSH_PUBLIC_KEY_PATH="${SSH_PUBLIC_KEY_PATH}"
+export VAULT_BASE_URL="${VAULT_BASE_URL}"
+export VAULT_SSH_USER_MOUNT_PATH="${VAULT_SSH_USER_MOUNT_PATH}"
+export VAULT_SSH_USER_ROLE_NAME="${VAULT_SSH_USER_ROLE_NAME}"
+export VAULT_GET_TOKEN_COMMAND="${VAULT_GET_TOKEN_COMMAND}"
+export CSSH_SSH_CONFIG="${CSSH_SSH_CONFIG}"
+
+# Add cssh scripts to PATH
+export PATH="\${PATH}:${HERE}"
+EOF
+
+  # Add RSYNC_RSH and GIT_SSH_COMMAND if using non-default SSH config
+  if [[ "${CSSH_SSH_CONFIG}" != "${HOME}/.ssh/config" ]]; then
+    cat >> "${profile_file}" <<EOF
+
+# Configure tools to use custom SSH config
+export RSYNC_RSH="ssh -F ${CSSH_SSH_CONFIG}"
+export GIT_SSH_COMMAND="ssh -F ${CSSH_SSH_CONFIG}"
+EOF
+  fi
+
+  chmod 600 "${profile_file}"
+
+  # Source the configuration
+  info "Sourcing configuration"
+  # shellcheck disable=SC1090
+  source "${profile_file}"
+
+  echo
+  echo -e "${GREEN}Installation complete!${NC}"
+  echo
+  echo "To use cssh in this shell, run:"
+  echo "  source ${profile_file}"
+  echo
+  echo "This will be automatic in new shells if ~/.profile sources ~/.profile.d/*"
+  echo
+
+  # Offer to add a host pattern
+  if confirm "Would you like to add a host pattern to SSH config now?" "y"; then
+    echo
+    "${HERE}/config" add
+  else
+    echo
+    echo "To add host patterns later, run:"
+    echo "  ${HERE}/config add"
+  fi
+}
+
+main "$@"
