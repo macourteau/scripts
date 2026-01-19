@@ -4,7 +4,7 @@ THIS=$(realpath "$0")
 readonly THIS
 HERE=$(dirname "$THIS")
 readonly HERE
-readonly SSH=${SSH:-ssh}
+readonly SCP=${SCP:-scp}
 
 # Get valid certificate paths
 cert_paths=$("${HERE}/cssh-ensure-cert")
@@ -13,4 +13,4 @@ readonly CERT_PATH
 KEY_PATH=$(echo "${cert_paths}" | tail -1)
 readonly KEY_PATH
 
-${SSH} -i "${CERT_PATH}" -i "${KEY_PATH}" "$@"
+${SCP} -i "${CERT_PATH}" -i "${KEY_PATH}" "$@"

@@ -1,0 +1,136 @@
+#!/bin/bash -eu
+
+# Ensures a valid signed SSH certificate exists, fetching from Vault if needed.
+# Outputs two lines: the certificate path and the private key path.
+#
+# Required environment variables:
+#   SSH_PUBLIC_KEY_PATH
+#   VAULT_BASE_URL
+#   VAULT_SSH_USER_MOUNT_PATH
+#   VAULT_SSH_USER_ROLE_NAME
+#   VAULT_GET_TOKEN_COMMAND
+#
+# Optional environment variables:
+#   CSSH_CACHE_DIR - Directory to cache certificates (default: ~/.cache/cssh)
+#   CSSH_CERT_BUFFER_SECONDS - Buffer time before expiry to request new cert (default: 60)
+
+fail() {
+  echo "$@" >&2
+  exit 1
+}
+
+if [[ -z "${SSH_PUBLIC_KEY_PATH:-}" ]]; then
+  fail "missing SSH_PUBLIC_KEY_PATH environment variable"
+fi
+
+if [[ -z "${VAULT_BASE_URL:-}" ]]; then
+  fail "missing VAULT_BASE_URL environment variable"
+fi
+
+if [[ -z "${VAULT_SSH_USER_MOUNT_PATH:-}" ]]; then
+  fail "missing VAULT_SSH_USER_MOUNT_PATH environment variable"
+fi
+
+if [[ -z "${VAULT_SSH_USER_ROLE_NAME:-}" ]]; then
+  fail "missing VAULT_SSH_USER_ROLE_NAME environment variable"
+fi
+
+if [[ -z "${VAULT_GET_TOKEN_COMMAND:-}" ]]; then
+  fail "missing VAULT_GET_TOKEN_COMMAND environment variable"
+fi
+
+readonly CACHE_DIR="${CSSH_CACHE_DIR:-${HOME}/.cache/cssh}"
+readonly BUFFER_SECONDS="${CSSH_CERT_BUFFER_SECONDS:-60}"
+
+# Derive a cache key from the public key path (use basename to handle different paths)
+KEY_NAME=$(basename "${SSH_PUBLIC_KEY_PATH}" .pub)
+readonly KEY_NAME
+readonly CACHED_CERT="${CACHE_DIR}/${KEY_NAME}-cert.pub"
+readonly PRIVATE_KEY="${SSH_PUBLIC_KEY_PATH%.pub}"
+
+# Check if certificate is valid
+is_cert_valid() {
+  local cert_file="$1"
+
+  if [[ ! -f "${cert_file}" ]]; then
+    return 1
+  fi
+
+  # Parse the certificate to get the expiry time
+  local cert_info
+  cert_info=$(ssh-keygen -L -f "${cert_file}" 2>/dev/null) || return 1
+
+  # Extract the "Valid: from ... to ..." line and get the expiry timestamp
+  local valid_line
+  valid_line=$(echo "${cert_info}" | grep -E "^\s+Valid:" | head -1) || return 1
+
+  # Extract the "to" date - format varies but typically "to YYYY-MM-DDTHH:MM:SS" or similar
+  local expiry_str
+  expiry_str=$(echo "${valid_line}" | sed -E 's/.*to ([^ ]+).*/\1/') || return 1
+
+  if [[ -z "${expiry_str}" ]]; then
+    return 1
+  fi
+
+  # Convert expiry to epoch seconds
+  local expiry_epoch
+  expiry_epoch=$(date -j -f "%Y-%m-%dT%H:%M:%S" "${expiry_str}" "+%s" 2>/dev/null) || \
+    expiry_epoch=$(date -d "${expiry_str}" "+%s" 2>/dev/null) || return 1
+
+  # Get current time
+  local now_epoch
+  now_epoch=$(date "+%s")
+
+  # Check if certificate is still valid with buffer
+  local adjusted_expiry=$((expiry_epoch - BUFFER_SECONDS))
+  if [[ ${now_epoch} -lt ${adjusted_expiry} ]]; then
+    return 0
+  fi
+
+  return 1
+}
+
+# Fetch a new certificate from Vault
+fetch_cert() {
+  local client_public_key
+  client_public_key=$(cat "${SSH_PUBLIC_KEY_PATH}")
+
+  local url="${VAULT_BASE_URL}/v1/${VAULT_SSH_USER_MOUNT_PATH}/sign/${VAULT_SSH_USER_ROLE_NAME}"
+
+  local tmp_response
+  tmp_response=$(mktemp)
+
+  cleanup() {
+    rm -f "${tmp_response}"
+  }
+  trap cleanup RETURN
+
+  curl \
+    --silent \
+    --header "X-Vault-Token: $($VAULT_GET_TOKEN_COMMAND)" \
+    --request POST \
+    --data "{\"public_key\":\"${client_public_key}\"}" \
+    "${url}" > "${tmp_response}"
+
+  if [[ "$(jq -r .errors "${tmp_response}")" != "null" ]]; then
+    jq . "${tmp_response}" >&2
+    return 1
+  fi
+
+  # Ensure cache directory exists
+  mkdir -p "${CACHE_DIR}"
+  chmod 700 "${CACHE_DIR}"
+
+  # Extract and save the signed certificate
+  jq -r .data.signed_key "${tmp_response}" > "${CACHED_CERT}"
+  chmod 600 "${CACHED_CERT}"
+}
+
+# Main logic
+if ! is_cert_valid "${CACHED_CERT}"; then
+  fetch_cert
+fi
+
+# Output the paths
+echo "${CACHED_CERT}"
+echo "${PRIVATE_KEY}"
