@@ -1,0 +1,137 @@
+#!/bin/bash -eu
+
+# install-truenas: Configure TrueNAS SCALE to accept Vault-signed SSH user certificates
+#
+# Usage: ./install-truenas
+#
+# This script is called by the main install script after platform detection and configuration.
+#
+# TrueNAS SCALE specifics:
+#   - Do NOT edit sshd_config directly - it's managed by middleware
+#   - Use midclt to update SSH options via the API
+#   - CA key file still needs to be written to /etc/ssh/
+#   - Changes via midclt persist across reboots
+#
+# Required environment variables (set by main install script):
+#   VAULT_BASE_URL              - Vault server URL
+#   VAULT_SSH_USER_MOUNT_PATH   - Mount path for user certs
+
+# Colors
+if [[ -t 1 ]]; then
+  RED='\033[0;31m'
+  GREEN='\033[0;32m'
+  YELLOW='\033[0;33m'
+  NC='\033[0m'
+else
+  RED=''
+  GREEN=''
+  YELLOW=''
+  NC=''
+fi
+
+info() {
+  echo -e "${GREEN}==>${NC} $*"
+}
+
+warn() {
+  echo -e "${YELLOW}warning:${NC} $*" >&2
+}
+
+fail() {
+  echo -e "${RED}error:${NC} $*" >&2
+  exit 1
+}
+
+# Validate environment
+if [[ -z "${VAULT_BASE_URL:-}" ]]; then
+  fail "VAULT_BASE_URL not set"
+fi
+
+if [[ -z "${VAULT_SSH_USER_MOUNT_PATH:-}" ]]; then
+  fail "VAULT_SSH_USER_MOUNT_PATH not set"
+fi
+
+# Verify we're on TrueNAS SCALE
+if ! command -v midclt >/dev/null 2>&1; then
+  fail "This script is for TrueNAS SCALE only (midclt not found)"
+fi
+
+# Configuration
+readonly CA_KEY_PATH="/etc/ssh/trusted-user-ca-keys.pem"
+readonly CA_URL="${VAULT_BASE_URL}/v1/${VAULT_SSH_USER_MOUNT_PATH}/public_key"
+
+# Fetch CA public key from Vault
+info "Fetching CA public key from Vault..."
+CA_KEY=$(curl --silent --fail "${CA_URL}") || fail "Failed to fetch CA key from ${CA_URL}"
+
+# Validate it looks like a public key
+if [[ ! "${CA_KEY}" =~ ^ssh- ]]; then
+  fail "Response doesn't look like an SSH public key: ${CA_KEY:0:50}..."
+fi
+
+echo "  Received: ${CA_KEY:0:60}..."
+
+# Write CA key file
+info "Writing CA key to ${CA_KEY_PATH}..."
+echo "${CA_KEY}" | sudo tee "${CA_KEY_PATH}" > /dev/null
+sudo chmod 0644 "${CA_KEY_PATH}"
+echo "  Done."
+
+# Get current SSH options via midclt
+info "Checking current SSH configuration..."
+CURRENT_OPTIONS=$(midclt call ssh.config | jq -r '.options // ""')
+echo "  Current options: ${CURRENT_OPTIONS:-<empty>}"
+
+# Check if TrustedUserCAKeys is already configured
+if echo "${CURRENT_OPTIONS}" | grep -q "TrustedUserCAKeys"; then
+  warn "TrustedUserCAKeys is already configured in SSH options."
+  echo "  Current setting will be replaced."
+  # Remove existing TrustedUserCAKeys line
+  NEW_OPTIONS=$(echo "${CURRENT_OPTIONS}" | grep -v "TrustedUserCAKeys" || true)
+else
+  NEW_OPTIONS="${CURRENT_OPTIONS}"
+fi
+
+# Add TrustedUserCAKeys
+if [[ -n "${NEW_OPTIONS}" ]]; then
+  # Append to existing options
+  NEW_OPTIONS="${NEW_OPTIONS}
+TrustedUserCAKeys ${CA_KEY_PATH}"
+else
+  NEW_OPTIONS="TrustedUserCAKeys ${CA_KEY_PATH}"
+fi
+
+# Update SSH options via midclt
+info "Updating SSH configuration via midclt..."
+
+# Escape for JSON
+JSON_OPTIONS=$(printf '%s' "${NEW_OPTIONS}" | jq -Rs .)
+
+if midclt call ssh.update "{\"options\": ${JSON_OPTIONS}}" > /dev/null; then
+  echo "  SSH configuration updated successfully."
+  echo "  sshd will be restarted automatically by TrueNAS."
+else
+  fail "Failed to update SSH configuration via midclt"
+fi
+
+# Verify the change
+info "Verifying configuration..."
+VERIFY_OPTIONS=$(midclt call ssh.config | jq -r '.options // ""')
+if echo "${VERIFY_OPTIONS}" | grep -q "TrustedUserCAKeys ${CA_KEY_PATH}"; then
+  echo "  Verified: TrustedUserCAKeys is configured."
+else
+  fail "Verification failed - TrustedUserCAKeys not found in configuration"
+fi
+
+echo
+echo -e "${GREEN}Installation complete!${NC}"
+echo
+echo "This host will now accept SSH connections authenticated with certificates"
+echo "signed by the Vault CA at: ${VAULT_BASE_URL}"
+echo
+echo "Configuration is managed by TrueNAS middleware and persists across reboots."
+echo
+echo "Note: After major TrueNAS updates, the CA key file at ${CA_KEY_PATH}"
+echo "may need to be recreated. Re-run this script if SSH cert auth stops working."
+echo
+echo "To test, connect from a client with a valid signed certificate."

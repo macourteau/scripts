@@ -1,0 +1,125 @@
+#!/bin/bash -eu
+
+# install-generic: Configure macOS or Linux (systemd) to accept Vault-signed SSH user certificates
+#
+# Usage: ./install-generic --platform <macos|linux>
+#
+# This script is called by the main install script after platform detection and configuration.
+#
+# Required environment variables (set by main install script):
+#   VAULT_BASE_URL              - Vault server URL
+#   VAULT_SSH_USER_MOUNT_PATH   - Mount path for user certs
+
+# Colors
+if [[ -t 1 ]]; then
+  RED='\033[0;31m'
+  GREEN='\033[0;32m'
+  NC='\033[0m'
+else
+  RED=''
+  GREEN=''
+  NC=''
+fi
+
+info() {
+  echo -e "${GREEN}==>${NC} $*"
+}
+
+fail() {
+  echo -e "${RED}error:${NC} $*" >&2
+  exit 1
+}
+
+# Parse arguments
+PLATFORM=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --platform)
+      PLATFORM="$2"
+      shift 2
+      ;;
+    *)
+      fail "unknown argument: $1"
+      ;;
+  esac
+done
+
+if [[ -z "${PLATFORM}" ]]; then
+  fail "--platform is required (macos or linux)"
+fi
+
+# Validate environment
+if [[ -z "${VAULT_BASE_URL:-}" ]]; then
+  fail "VAULT_BASE_URL not set"
+fi
+
+if [[ -z "${VAULT_SSH_USER_MOUNT_PATH:-}" ]]; then
+  fail "VAULT_SSH_USER_MOUNT_PATH not set"
+fi
+
+# Configuration
+readonly CA_KEY_PATH="/etc/ssh/trusted-user-ca-keys.pem"
+readonly SSHD_CONFIG="/etc/ssh/sshd_config"
+readonly CA_URL="${VAULT_BASE_URL}/v1/${VAULT_SSH_USER_MOUNT_PATH}/public_key"
+
+# Fetch CA public key from Vault
+info "Fetching CA public key from Vault..."
+CA_KEY=$(curl --silent --fail "${CA_URL}") || fail "Failed to fetch CA key from ${CA_URL}"
+
+# Validate it looks like a public key
+if [[ ! "${CA_KEY}" =~ ^ssh- ]]; then
+  fail "Response doesn't look like an SSH public key: ${CA_KEY:0:50}..."
+fi
+
+echo "  Received: ${CA_KEY:0:60}..."
+
+# Write CA key file
+info "Writing CA key to ${CA_KEY_PATH}..."
+echo "${CA_KEY}" | sudo tee "${CA_KEY_PATH}" > /dev/null
+sudo chmod 0644 "${CA_KEY_PATH}"
+echo "  Done."
+
+# Update sshd_config
+info "Updating ${SSHD_CONFIG}..."
+
+# Check if TrustedUserCAKeys already exists
+if grep -q "^TrustedUserCAKeys" "${SSHD_CONFIG}"; then
+  # Update existing line
+  if [[ "${PLATFORM}" == "macos" ]]; then
+    sudo sed -i '' "s|^TrustedUserCAKeys.*|TrustedUserCAKeys ${CA_KEY_PATH}|" "${SSHD_CONFIG}"
+  else
+    sudo sed -i.bak "s|^TrustedUserCAKeys.*|TrustedUserCAKeys ${CA_KEY_PATH}|" "${SSHD_CONFIG}"
+  fi
+  echo "  Updated existing TrustedUserCAKeys line."
+else
+  # Add new line
+  echo "TrustedUserCAKeys ${CA_KEY_PATH}" | sudo tee -a "${SSHD_CONFIG}" > /dev/null
+  echo "  Added TrustedUserCAKeys line."
+fi
+
+# Restart sshd
+info "Restarting sshd..."
+
+if [[ "${PLATFORM}" == "macos" ]]; then
+  # macOS uses launchctl
+  sudo launchctl unload /System/Library/LaunchDaemons/ssh.plist 2>/dev/null || true
+  sudo launchctl load -w /System/Library/LaunchDaemons/ssh.plist
+  echo "  Restarted via launchctl."
+else
+  # Linux with systemd - try both service names
+  if sudo systemctl restart sshd 2>/dev/null; then
+    echo "  Restarted sshd.service."
+  elif sudo systemctl restart ssh 2>/dev/null; then
+    echo "  Restarted ssh.service."
+  else
+    fail "Failed to restart sshd. Try manually: sudo systemctl restart sshd"
+  fi
+fi
+
+echo
+echo -e "${GREEN}Installation complete!${NC}"
+echo
+echo "This host will now accept SSH connections authenticated with certificates"
+echo "signed by the Vault CA at: ${VAULT_BASE_URL}"
+echo
+echo "To test, connect from a client with a valid signed certificate."

@@ -1,0 +1,258 @@
+#!/bin/bash -eu
+
+# uninstall: Remove Vault-signed SSH user certificate configuration
+#
+# Usage: ./uninstall
+#
+# This script will:
+#   1. Detect the platform
+#   2. Remove TrustedUserCAKeys from sshd configuration
+#   3. Delete the CA key file
+#   4. Restart sshd
+
+# Colors
+if [[ -t 1 ]]; then
+  RED='\033[0;31m'
+  GREEN='\033[0;32m'
+  YELLOW='\033[0;33m'
+  NC='\033[0m'
+else
+  RED=''
+  GREEN=''
+  YELLOW=''
+  NC=''
+fi
+
+info() {
+  echo -e "${GREEN}==>${NC} $*"
+}
+
+warn() {
+  echo -e "${YELLOW}warning:${NC} $*" >&2
+}
+
+fail() {
+  echo -e "${RED}error:${NC} $*" >&2
+  exit 1
+}
+
+# Prompt for yes/no
+confirm() {
+  local prompt_text="$1"
+  local default="${2:-n}"
+
+  local yn_hint
+  if [[ "${default}" == "y" ]]; then
+    yn_hint="[Y/n]"
+  else
+    yn_hint="[y/N]"
+  fi
+
+  local response
+  read -r -p "${prompt_text} ${yn_hint}: " response
+  response="${response:-${default}}"
+
+  case "${response}" in
+    [yY]|[yY][eE][sS]) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# Detect platform
+detect_platform() {
+  if [[ -f /etc/unraid-version ]]; then
+    echo "unraid"
+  elif command -v midclt >/dev/null 2>&1 && [[ -f /etc/version ]]; then
+    echo "truenas"
+  elif [[ "$(uname)" == "Darwin" ]]; then
+    echo "macos"
+  elif command -v systemctl >/dev/null 2>&1; then
+    echo "linux"
+  else
+    echo "unknown"
+  fi
+}
+
+# Uninstall for macOS/Linux
+uninstall_generic() {
+  local platform="$1"
+  local ca_key_path="/etc/ssh/trusted-user-ca-keys.pem"
+  local sshd_config="/etc/ssh/sshd_config"
+
+  # Remove TrustedUserCAKeys from sshd_config
+  if grep -q "^TrustedUserCAKeys" "${sshd_config}"; then
+    info "Removing TrustedUserCAKeys from ${sshd_config}..."
+    if [[ "${platform}" == "macos" ]]; then
+      sudo sed -i '' '/^TrustedUserCAKeys/d' "${sshd_config}"
+    else
+      sudo sed -i.bak '/^TrustedUserCAKeys/d' "${sshd_config}"
+    fi
+    echo "  Removed."
+  else
+    echo "  TrustedUserCAKeys not found in ${sshd_config}."
+  fi
+
+  # Delete CA key file
+  if [[ -f "${ca_key_path}" ]]; then
+    info "Removing CA key file ${ca_key_path}..."
+    sudo rm -f "${ca_key_path}"
+    echo "  Removed."
+  else
+    echo "  CA key file not found."
+  fi
+
+  # Restart sshd
+  info "Restarting sshd..."
+  if [[ "${platform}" == "macos" ]]; then
+    sudo launchctl unload /System/Library/LaunchDaemons/ssh.plist 2>/dev/null || true
+    sudo launchctl load -w /System/Library/LaunchDaemons/ssh.plist
+    echo "  Restarted via launchctl."
+  else
+    if sudo systemctl restart sshd 2>/dev/null; then
+      echo "  Restarted sshd.service."
+    elif sudo systemctl restart ssh 2>/dev/null; then
+      echo "  Restarted ssh.service."
+    else
+      warn "Failed to restart sshd. Try manually: sudo systemctl restart sshd"
+    fi
+  fi
+}
+
+# Uninstall for Unraid
+uninstall_unraid() {
+  local boot_ssh_dir="/boot/config/ssh"
+  local etc_ssh_dir="/etc/ssh"
+  local ca_key_name="trusted-user-ca-keys.pem"
+
+  # Remove TrustedUserCAKeys from both sshd_config files
+  for config_dir in "${boot_ssh_dir}" "${etc_ssh_dir}"; do
+    local config_file="${config_dir}/sshd_config"
+    if [[ -f "${config_file}" ]] && grep -q "^TrustedUserCAKeys" "${config_file}"; then
+      info "Removing TrustedUserCAKeys from ${config_file}..."
+      sed -i.bak '/^TrustedUserCAKeys/d' "${config_file}"
+      echo "  Removed."
+    fi
+  done
+
+  # Delete CA key files
+  for ca_dir in "${boot_ssh_dir}" "${etc_ssh_dir}"; do
+    local ca_file="${ca_dir}/${ca_key_name}"
+    if [[ -f "${ca_file}" ]]; then
+      info "Removing CA key file ${ca_file}..."
+      rm -f "${ca_file}"
+      echo "  Removed."
+    fi
+  done
+
+  # Restart sshd
+  info "Restarting sshd..."
+  if /etc/rc.d/rc.sshd restart; then
+    echo "  Restarted via rc.sshd."
+  else
+    warn "Failed to restart sshd. Try manually: /etc/rc.d/rc.sshd restart"
+  fi
+}
+
+# Uninstall for TrueNAS SCALE
+uninstall_truenas() {
+  local ca_key_path="/etc/ssh/trusted-user-ca-keys.pem"
+
+  # Get current SSH options
+  info "Checking current SSH configuration..."
+  local current_options
+  current_options=$(midclt call ssh.config | jq -r '.options // ""')
+
+  if echo "${current_options}" | grep -q "TrustedUserCAKeys"; then
+    info "Removing TrustedUserCAKeys from SSH options..."
+    # Remove TrustedUserCAKeys line(s)
+    local new_options
+    new_options=$(echo "${current_options}" | grep -v "TrustedUserCAKeys" || true)
+
+    # Update via midclt
+    local json_options
+    json_options=$(printf '%s' "${new_options}" | jq -Rs .)
+
+    if midclt call ssh.update "{\"options\": ${json_options}}" > /dev/null; then
+      echo "  SSH configuration updated."
+    else
+      warn "Failed to update SSH configuration via midclt"
+    fi
+  else
+    echo "  TrustedUserCAKeys not found in SSH options."
+  fi
+
+  # Delete CA key file
+  if [[ -f "${ca_key_path}" ]]; then
+    info "Removing CA key file ${ca_key_path}..."
+    sudo rm -f "${ca_key_path}"
+    echo "  Removed."
+  else
+    echo "  CA key file not found."
+  fi
+}
+
+main() {
+  echo "cssh-host uninstaller"
+  echo "====================="
+  echo
+  echo "This will remove Vault-signed SSH user certificate configuration."
+  echo
+
+  # Detect platform
+  info "Detecting platform..."
+  local platform
+  platform=$(detect_platform)
+
+  case "${platform}" in
+    unraid)
+      echo "  Detected: Unraid"
+      ;;
+    truenas)
+      echo "  Detected: TrueNAS SCALE"
+      ;;
+    macos)
+      echo "  Detected: macOS"
+      ;;
+    linux)
+      echo "  Detected: Linux"
+      ;;
+    *)
+      fail "Unknown platform"
+      ;;
+  esac
+
+  echo
+
+  if ! confirm "Remove Vault SSH certificate configuration?"; then
+    echo "Aborted."
+    exit 0
+  fi
+
+  echo
+
+  case "${platform}" in
+    unraid)
+      uninstall_unraid
+      ;;
+    truenas)
+      uninstall_truenas
+      ;;
+    macos|linux)
+      uninstall_generic "${platform}"
+      ;;
+  esac
+
+  # Remove config file
+  if [[ -f /etc/cssh-host.conf ]]; then
+    info "Removing configuration file /etc/cssh-host.conf..."
+    sudo rm -f /etc/cssh-host.conf
+    echo "  Removed."
+  fi
+
+  echo
+  echo -e "${GREEN}Uninstall complete!${NC}"
+  echo
+  echo "This host will no longer accept Vault-signed SSH certificates."
+}
+
+main "$@"

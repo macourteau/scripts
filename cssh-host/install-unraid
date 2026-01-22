@@ -1,0 +1,130 @@
+#!/bin/bash -eu
+
+# install-unraid: Configure Unraid to accept Vault-signed SSH user certificates
+#
+# Usage: ./install-unraid
+#
+# This script is called by the main install script after platform detection and configuration.
+#
+# Unraid specifics:
+#   - SSH config persists via /boot/config/ssh/ (copied to /etc/ssh/ on boot)
+#   - Must write to BOTH locations for persistence + immediate effect
+#   - No systemd - uses /etc/rc.d/rc.sshd restart
+#
+# Required environment variables (set by main install script):
+#   VAULT_BASE_URL              - Vault server URL
+#   VAULT_SSH_USER_MOUNT_PATH   - Mount path for user certs
+
+# Colors
+if [[ -t 1 ]]; then
+  RED='\033[0;31m'
+  GREEN='\033[0;32m'
+  NC='\033[0m'
+else
+  RED=''
+  GREEN=''
+  NC=''
+fi
+
+info() {
+  echo -e "${GREEN}==>${NC} $*"
+}
+
+fail() {
+  echo -e "${RED}error:${NC} $*" >&2
+  exit 1
+}
+
+# Validate environment
+if [[ -z "${VAULT_BASE_URL:-}" ]]; then
+  fail "VAULT_BASE_URL not set"
+fi
+
+if [[ -z "${VAULT_SSH_USER_MOUNT_PATH:-}" ]]; then
+  fail "VAULT_SSH_USER_MOUNT_PATH not set"
+fi
+
+# Verify we're on Unraid
+if [[ ! -f /etc/unraid-version ]]; then
+  fail "This script is for Unraid only"
+fi
+
+# Configuration
+readonly BOOT_SSH_DIR="/boot/config/ssh"
+readonly ETC_SSH_DIR="/etc/ssh"
+readonly CA_KEY_NAME="trusted-user-ca-keys.pem"
+readonly CA_URL="${VAULT_BASE_URL}/v1/${VAULT_SSH_USER_MOUNT_PATH}/public_key"
+
+# Fetch CA public key from Vault
+info "Fetching CA public key from Vault..."
+CA_KEY=$(curl --silent --fail "${CA_URL}") || fail "Failed to fetch CA key from ${CA_URL}"
+
+# Validate it looks like a public key
+if [[ ! "${CA_KEY}" =~ ^ssh- ]]; then
+  fail "Response doesn't look like an SSH public key: ${CA_KEY:0:50}..."
+fi
+
+echo "  Received: ${CA_KEY:0:60}..."
+
+# Ensure boot SSH directory exists
+if [[ ! -d "${BOOT_SSH_DIR}" ]]; then
+  info "Creating ${BOOT_SSH_DIR}..."
+  mkdir -p "${BOOT_SSH_DIR}"
+fi
+
+# Write CA key to boot (persistence) and etc (immediate)
+info "Writing CA key files..."
+
+echo "${CA_KEY}" > "${BOOT_SSH_DIR}/${CA_KEY_NAME}"
+chmod 0644 "${BOOT_SSH_DIR}/${CA_KEY_NAME}"
+echo "  Written to ${BOOT_SSH_DIR}/${CA_KEY_NAME} (persistent)"
+
+cp "${BOOT_SSH_DIR}/${CA_KEY_NAME}" "${ETC_SSH_DIR}/${CA_KEY_NAME}"
+chmod 0644 "${ETC_SSH_DIR}/${CA_KEY_NAME}"
+echo "  Copied to ${ETC_SSH_DIR}/${CA_KEY_NAME} (immediate)"
+
+# Handle sshd_config
+# If there's no custom sshd_config in boot, copy current one from etc
+info "Updating sshd_config..."
+
+if [[ ! -f "${BOOT_SSH_DIR}/sshd_config" ]]; then
+  echo "  No custom sshd_config in ${BOOT_SSH_DIR}, copying from ${ETC_SSH_DIR}..."
+  cp "${ETC_SSH_DIR}/sshd_config" "${BOOT_SSH_DIR}/sshd_config"
+fi
+
+# Update sshd_config in both locations
+update_sshd_config() {
+  local config_file="$1"
+
+  if grep -q "^TrustedUserCAKeys" "${config_file}"; then
+    # Update existing line
+    sed -i.bak "s|^TrustedUserCAKeys.*|TrustedUserCAKeys ${ETC_SSH_DIR}/${CA_KEY_NAME}|" "${config_file}"
+    echo "  Updated TrustedUserCAKeys in ${config_file}"
+  else
+    # Add new line
+    echo "TrustedUserCAKeys ${ETC_SSH_DIR}/${CA_KEY_NAME}" >> "${config_file}"
+    echo "  Added TrustedUserCAKeys to ${config_file}"
+  fi
+}
+
+update_sshd_config "${BOOT_SSH_DIR}/sshd_config"
+update_sshd_config "${ETC_SSH_DIR}/sshd_config"
+
+# Restart sshd
+info "Restarting sshd..."
+
+if /etc/rc.d/rc.sshd restart; then
+  echo "  Restarted via rc.sshd."
+else
+  fail "Failed to restart sshd. Try manually: /etc/rc.d/rc.sshd restart"
+fi
+
+echo
+echo -e "${GREEN}Installation complete!${NC}"
+echo
+echo "This host will now accept SSH connections authenticated with certificates"
+echo "signed by the Vault CA at: ${VAULT_BASE_URL}"
+echo
+echo "Configuration persists across reboots via ${BOOT_SSH_DIR}/"
+echo
+echo "To test, connect from a client with a valid signed certificate."

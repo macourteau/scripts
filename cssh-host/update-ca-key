@@ -1,0 +1,211 @@
+#!/bin/bash -eu
+
+# update-ca-key: Fetch and update the Vault CA public key on this host
+#
+# Usage: ./update-ca-key [options]
+#
+# Options:
+#   --quiet, -q      Suppress output (for cron jobs)
+#   --append, -a     Append new key instead of replacing (for rotation transitions)
+#   --check, -c      Check if update is needed, but don't apply
+#
+# This script can be run manually or via cron to keep the CA key up to date.
+#
+# Required environment variables:
+#   VAULT_BASE_URL              - Vault server URL
+#   VAULT_SSH_USER_MOUNT_PATH   - Mount path for user certs
+#
+# These can be set in /etc/cssh-host.conf or passed directly.
+
+# Load config file if it exists
+CONFIG_FILE="/etc/cssh-host.conf"
+if [[ -f "${CONFIG_FILE}" ]]; then
+  # shellcheck source=/dev/null
+  source "${CONFIG_FILE}"
+fi
+
+# Defaults
+QUIET=0
+APPEND=0
+CHECK_ONLY=0
+
+# Parse arguments
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --quiet|-q)
+      QUIET=1
+      shift
+      ;;
+    --append|-a)
+      APPEND=1
+      shift
+      ;;
+    --check|-c)
+      CHECK_ONLY=1
+      shift
+      ;;
+    *)
+      echo "error: unknown argument: $1" >&2
+      exit 1
+      ;;
+  esac
+done
+
+# Output functions
+info() {
+  if [[ ${QUIET} -eq 0 ]]; then
+    echo "==> $*"
+  fi
+}
+
+error() {
+  echo "error: $*" >&2
+}
+
+# Validate environment
+if [[ -z "${VAULT_BASE_URL:-}" ]]; then
+  error "VAULT_BASE_URL not set. Set it in ${CONFIG_FILE} or environment."
+  exit 1
+fi
+
+if [[ -z "${VAULT_SSH_USER_MOUNT_PATH:-}" ]]; then
+  error "VAULT_SSH_USER_MOUNT_PATH not set. Set it in ${CONFIG_FILE} or environment."
+  exit 1
+fi
+
+# Detect platform
+detect_platform() {
+  if [[ -f /etc/unraid-version ]]; then
+    echo "unraid"
+  elif command -v midclt >/dev/null 2>&1 && [[ -f /etc/version ]]; then
+    echo "truenas"
+  elif [[ "$(uname)" == "Darwin" ]]; then
+    echo "macos"
+  elif command -v systemctl >/dev/null 2>&1; then
+    echo "linux"
+  else
+    echo "unknown"
+  fi
+}
+
+# Get CA key paths based on platform
+get_ca_paths() {
+  local platform="$1"
+
+  case "${platform}" in
+    unraid)
+      # Unraid needs both locations
+      echo "/boot/config/ssh/trusted-user-ca-keys.pem /etc/ssh/trusted-user-ca-keys.pem"
+      ;;
+    *)
+      echo "/etc/ssh/trusted-user-ca-keys.pem"
+      ;;
+  esac
+}
+
+# Fetch CA key from Vault
+fetch_ca_key() {
+  local url="${VAULT_BASE_URL}/v1/${VAULT_SSH_USER_MOUNT_PATH}/public_key"
+  local key
+
+  key=$(curl --silent --fail --max-time 30 "${url}") || {
+    error "Failed to fetch CA key from ${url}"
+    return 1
+  }
+
+  # Validate it looks like a public key
+  if [[ ! "${key}" =~ ^ssh- ]]; then
+    error "Response doesn't look like an SSH public key"
+    return 1
+  fi
+
+  echo "${key}"
+}
+
+# Check if key is already present in file
+key_in_file() {
+  local key="$1"
+  local file="$2"
+
+  if [[ ! -f "${file}" ]]; then
+    return 1
+  fi
+
+  grep -qF "${key}" "${file}"
+}
+
+# Update CA key file
+update_ca_file() {
+  local key="$1"
+  local file="$2"
+  local append="$3"
+
+  if [[ ${append} -eq 1 ]]; then
+    # Append mode - add key if not already present
+    if key_in_file "${key}" "${file}"; then
+      info "Key already present in ${file}"
+      return 0
+    fi
+    echo "${key}" | sudo tee -a "${file}" > /dev/null
+    info "Appended key to ${file}"
+  else
+    # Replace mode
+    echo "${key}" | sudo tee "${file}" > /dev/null
+    sudo chmod 0644 "${file}"
+    info "Updated ${file}"
+  fi
+}
+
+main() {
+  local platform
+  platform=$(detect_platform)
+
+  if [[ "${platform}" == "unknown" ]]; then
+    error "Unknown platform"
+    exit 1
+  fi
+
+  info "Platform: ${platform}"
+
+  # Fetch the CA key
+  info "Fetching CA key from Vault..."
+  local new_key
+  new_key=$(fetch_ca_key) || exit 1
+
+  # Get paths for this platform
+  local paths
+  paths=$(get_ca_paths "${platform}")
+
+  # Check mode - just report if update is needed
+  if [[ ${CHECK_ONLY} -eq 1 ]]; then
+    local needs_update=0
+    for path in ${paths}; do
+      if [[ ! -f "${path}" ]]; then
+        echo "Missing: ${path}"
+        needs_update=1
+      elif ! key_in_file "${new_key}" "${path}"; then
+        echo "Outdated: ${path}"
+        needs_update=1
+      else
+        echo "Current: ${path}"
+      fi
+    done
+    exit ${needs_update}
+  fi
+
+  # Update each CA key file
+  for path in ${paths}; do
+    # Ensure directory exists (for Unraid boot config)
+    local dir
+    dir=$(dirname "${path}")
+    if [[ ! -d "${dir}" ]]; then
+      sudo mkdir -p "${dir}"
+    fi
+
+    update_ca_file "${new_key}" "${path}" "${APPEND}"
+  done
+
+  info "CA key update complete"
+}
+
+main
