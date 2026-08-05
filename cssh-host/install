@@ -2,12 +2,26 @@
 
 # install: Configure this host to accept Vault-signed SSH user certificates
 #
-# Usage: ./install
+# Usage: ./install [--allow-principal NAME] [--principal-user USER]
 #
 # This script will:
 #   1. Prompt for Vault configuration (or use existing environment variables)
 #   2. Detect the platform (macOS, Linux, Unraid, TrueNAS)
 #   3. Delegate to the appropriate platform-specific installer
+#
+# Options:
+#   --allow-principal NAME   Certificate principal permitted to log in
+#                            (repeatable).
+#   --principal-user USER    Local account those principals may log in as
+#                            (repeatable; defaults to the account running this
+#                            script). Requires --allow-principal.
+#   --help, -h               Show this message.
+#
+# A certificate only authorises a login when its principal list contains the
+# login username. Pass --allow-principal on hosts you log into under a service
+# account, where the account name differs from your certificate principal:
+#
+#   ./install --allow-principal macourteau      # run as `ci`, allows ci login
 #
 # Supported platforms:
 #   - macOS
@@ -42,6 +56,52 @@ warn() {
 fail() {
   echo -e "${RED}error:${NC} $*" >&2
   exit 1
+}
+
+usage() {
+  head -30 "$0" | tail -28
+  exit "${1:-0}"
+}
+
+# Certificate principals permitted to log in, and the local accounts they may
+# log in as. Both empty unless --allow-principal is passed.
+ALLOWED_PRINCIPALS=""
+PRINCIPAL_USERS=""
+
+parse_args() {
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --allow-principal)
+        [[ $# -ge 2 ]] || fail "--allow-principal requires a value"
+        ALLOWED_PRINCIPALS="${ALLOWED_PRINCIPALS} $2"
+        shift 2
+        ;;
+      --principal-user)
+        [[ $# -ge 2 ]] || fail "--principal-user requires a value"
+        PRINCIPAL_USERS="${PRINCIPAL_USERS} $2"
+        shift 2
+        ;;
+      --help|-h)
+        usage 0
+        ;;
+      *)
+        fail "unknown argument: $1"
+        ;;
+    esac
+  done
+
+  if [[ -n "${PRINCIPAL_USERS}" ]] && [[ -z "${ALLOWED_PRINCIPALS}" ]]; then
+    fail "--principal-user requires at least one --allow-principal"
+  fi
+
+  # Default to the account running the installer, which on a service-account
+  # host is the account you want the mapping for.
+  if [[ -n "${ALLOWED_PRINCIPALS}" ]] && [[ -z "${PRINCIPAL_USERS}" ]]; then
+    PRINCIPAL_USERS=$(id -un)
+  fi
+
+  ALLOWED_PRINCIPALS="${ALLOWED_PRINCIPALS# }"
+  PRINCIPAL_USERS="${PRINCIPAL_USERS# }"
 }
 
 # Check for a required command
@@ -99,6 +159,8 @@ detect_platform() {
 }
 
 main() {
+  parse_args "$@"
+
   echo "cssh-host installer"
   echo "==================="
   echo
@@ -172,6 +234,12 @@ main() {
   echo "  Vault URL:        ${VAULT_BASE_URL}"
   echo "  Vault mount path: ${VAULT_SSH_USER_MOUNT_PATH}"
   echo "  CA key endpoint:  ${VAULT_BASE_URL}/v1/${VAULT_SSH_USER_MOUNT_PATH}/public_key"
+  if [[ -n "${ALLOWED_PRINCIPALS}" ]]; then
+    echo "  Principals:       ${ALLOWED_PRINCIPALS}"
+    echo "  May log in as:    ${PRINCIPAL_USERS}"
+  else
+    echo "  Principals:       none (certificates must list the login username)"
+  fi
   echo
 
   # Save configuration for update-ca-key script
@@ -182,12 +250,17 @@ main() {
 
 VAULT_BASE_URL="${VAULT_BASE_URL}"
 VAULT_SSH_USER_MOUNT_PATH="${VAULT_SSH_USER_MOUNT_PATH}"
+CSSH_ALLOWED_PRINCIPALS="${ALLOWED_PRINCIPALS}"
+CSSH_PRINCIPAL_USERS="${PRINCIPAL_USERS}"
 EOF
   sudo chmod 0644 /etc/cssh-host.conf
   echo "  Saved."
   echo
 
   # Delegate to platform-specific installer
+  export CSSH_ALLOWED_PRINCIPALS="${ALLOWED_PRINCIPALS}"
+  export CSSH_PRINCIPAL_USERS="${PRINCIPAL_USERS}"
+
   info "Running platform-specific installer..."
   echo
 

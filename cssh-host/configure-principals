@@ -1,0 +1,101 @@
+#!/bin/bash -eu
+
+# configure-principals: Map certificate principals onto local login accounts
+#
+# Usage: ./configure-principals
+#
+# Writes /etc/ssh/auth_principals/<account> for each account, listing the
+# certificate principals allowed to log in as it. Called by the platform
+# installers, which are responsible for pointing AuthorizedPrincipalsFile at
+# the directory.
+#
+# Required environment variables (set by the main install script):
+#   CSSH_ALLOWED_PRINCIPALS  - whitespace-separated certificate principals
+#   CSSH_PRINCIPAL_USERS     - whitespace-separated local accounts
+
+readonly AUTH_PRINCIPALS_DIR="/etc/ssh/auth_principals"
+
+# Colors (only if terminal supports them)
+if [[ -t 1 ]]; then
+  RED='\033[0;31m'
+  GREEN='\033[0;32m'
+  YELLOW='\033[0;33m'
+  NC='\033[0m'
+else
+  RED=''
+  GREEN=''
+  YELLOW=''
+  NC=''
+fi
+
+info() {
+  echo -e "${GREEN}==>${NC} $*"
+}
+
+warn() {
+  echo -e "${YELLOW}warning:${NC} $*" >&2
+}
+
+fail() {
+  echo -e "${RED}error:${NC} $*" >&2
+  exit 1
+}
+
+# Run a command as root, whether or not we already are
+as_root() {
+  if [[ "$(id -u)" -eq 0 ]]; then
+    "$@"
+  else
+    sudo "$@"
+  fi
+}
+
+# Deduplicate a whitespace-separated list, preserving order
+dedupe() {
+  local seen="" item
+  for item in $1; do
+    case " ${seen} " in
+      *" ${item} "*) continue ;;
+    esac
+    seen="${seen} ${item}"
+  done
+  echo "${seen# }"
+}
+
+if [[ -z "${CSSH_ALLOWED_PRINCIPALS:-}" ]]; then
+  fail "CSSH_ALLOWED_PRINCIPALS not set"
+fi
+
+PRINCIPALS=$(dedupe "${CSSH_ALLOWED_PRINCIPALS}")
+
+# Setting AuthorizedPrincipalsFile switches off sshd's implicit
+# principal-equals-username match for every account on the host. Give any
+# account named after a principal its own file so it keeps working.
+ACCOUNTS="${CSSH_PRINCIPAL_USERS:-}"
+for principal in ${PRINCIPALS}; do
+  if id -u "${principal}" >/dev/null 2>&1; then
+    ACCOUNTS="${ACCOUNTS} ${principal}"
+  fi
+done
+ACCOUNTS=$(dedupe "${ACCOUNTS}")
+
+if [[ -z "${ACCOUNTS}" ]]; then
+  fail "no accounts to configure; pass --principal-user"
+fi
+
+info "Writing principal files to ${AUTH_PRINCIPALS_DIR}..."
+as_root install -d -m 0755 "${AUTH_PRINCIPALS_DIR}"
+
+for account in ${ACCOUNTS}; do
+  if ! id -u "${account}" >/dev/null 2>&1; then
+    warn "no local account '${account}' on this host; writing its file anyway"
+  fi
+  # shellcheck disable=SC2086
+  printf '%s\n' ${PRINCIPALS} | as_root tee "${AUTH_PRINCIPALS_DIR}/${account}" > /dev/null
+  as_root chmod 0644 "${AUTH_PRINCIPALS_DIR}/${account}"
+  echo "  ${account}: ${PRINCIPALS}"
+done
+
+warn "AuthorizedPrincipalsFile replaces sshd's implicit principal-equals-username
+  match for every account on this host. Accounts without a file in
+  ${AUTH_PRINCIPALS_DIR} can no longer authenticate with a certificate."

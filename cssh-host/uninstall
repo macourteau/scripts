@@ -6,8 +6,9 @@
 #
 # This script will:
 #   1. Detect the platform
-#   2. Remove TrustedUserCAKeys from sshd configuration
-#   3. Delete the CA key file
+#   2. Remove TrustedUserCAKeys and AuthorizedPrincipalsFile from sshd
+#      configuration
+#   3. Delete the CA key file and the principal files
 #   4. Restart sshd
 
 # Colors
@@ -73,6 +74,26 @@ detect_platform() {
   fi
 }
 
+readonly AUTH_PRINCIPALS_DIR="/etc/ssh/auth_principals"
+
+# Remove the principal files, and the directories we may have staged them in.
+# Only removes AuthorizedPrincipalsFile lines that point at our own directory,
+# so a mapping configured for some other purpose is left alone.
+remove_principals() {
+  local dir
+  for dir in "$@"; do
+    if [[ -d "${dir}" ]]; then
+      info "Removing principal files ${dir}..."
+      sudo rm -rf "${dir}"
+      echo "  Removed."
+    fi
+  done
+}
+
+principals_line_is_ours() {
+  grep -qE "^AuthorizedPrincipalsFile[[:space:]]+${AUTH_PRINCIPALS_DIR}/" "$1"
+}
+
 # Uninstall for macOS/Linux
 uninstall_generic() {
   local platform="$1"
@@ -91,6 +112,19 @@ uninstall_generic() {
   else
     echo "  TrustedUserCAKeys not found in ${sshd_config}."
   fi
+
+  # Remove AuthorizedPrincipalsFile if we were the ones who set it
+  if [[ -f "${sshd_config}" ]] && principals_line_is_ours "${sshd_config}"; then
+    info "Removing AuthorizedPrincipalsFile from ${sshd_config}..."
+    if [[ "${platform}" == "macos" ]]; then
+      sudo sed -i '' '/^AuthorizedPrincipalsFile/d' "${sshd_config}"
+    else
+      sudo sed -i.bak '/^AuthorizedPrincipalsFile/d' "${sshd_config}"
+    fi
+    echo "  Removed."
+  fi
+
+  remove_principals "${AUTH_PRINCIPALS_DIR}"
 
   # Delete CA key file
   if [[ -f "${ca_key_path}" ]]; then
@@ -132,7 +166,14 @@ uninstall_unraid() {
       sed -i.bak '/^TrustedUserCAKeys/d' "${config_file}"
       echo "  Removed."
     fi
+    if [[ -f "${config_file}" ]] && principals_line_is_ours "${config_file}"; then
+      info "Removing AuthorizedPrincipalsFile from ${config_file}..."
+      sed -i.bak '/^AuthorizedPrincipalsFile/d' "${config_file}"
+      echo "  Removed."
+    fi
   done
+
+  remove_principals "${AUTH_PRINCIPALS_DIR}" "${boot_ssh_dir}/auth_principals"
 
   # Delete CA key files
   for ca_dir in "${boot_ssh_dir}" "${etc_ssh_dir}"; do
@@ -162,11 +203,12 @@ uninstall_truenas() {
   local current_options
   current_options=$(midclt call ssh.config | jq -r '.options // ""')
 
-  if echo "${current_options}" | grep -q "TrustedUserCAKeys"; then
-    info "Removing TrustedUserCAKeys from SSH options..."
-    # Remove TrustedUserCAKeys line(s)
+  if echo "${current_options}" | grep -qE "TrustedUserCAKeys|^AuthorizedPrincipalsFile[[:space:]]+${AUTH_PRINCIPALS_DIR}/"; then
+    info "Removing cssh-host options from SSH configuration..."
     local new_options
-    new_options=$(echo "${current_options}" | grep -v "TrustedUserCAKeys" || true)
+    new_options=$(printf '%s' "${current_options}" \
+      | grep -v "TrustedUserCAKeys" \
+      | grep -vE "^AuthorizedPrincipalsFile[[:space:]]+${AUTH_PRINCIPALS_DIR}/" || true)
 
     # Update via midclt
     local json_options
@@ -178,8 +220,10 @@ uninstall_truenas() {
       warn "Failed to update SSH configuration via midclt"
     fi
   else
-    echo "  TrustedUserCAKeys not found in SSH options."
+    echo "  No cssh-host options found in SSH configuration."
   fi
+
+  remove_principals "${AUTH_PRINCIPALS_DIR}"
 
   # Delete CA key file
   if [[ -f "${ca_key_path}" ]]; then

@@ -9,6 +9,13 @@
 # Required environment variables (set by main install script):
 #   VAULT_BASE_URL              - Vault server URL
 #   VAULT_SSH_USER_MOUNT_PATH   - Mount path for user certs
+#
+# Optional environment variables:
+#   CSSH_ALLOWED_PRINCIPALS     - certificate principals permitted to log in
+#   CSSH_PRINCIPAL_USERS        - local accounts they may log in as
+
+HERE=$(cd "$(dirname "$0")" && pwd)
+readonly HERE
 
 # Colors
 if [[ -t 1 ]]; then
@@ -60,7 +67,26 @@ fi
 # Configuration
 readonly CA_KEY_PATH="/etc/ssh/trusted-user-ca-keys.pem"
 readonly SSHD_CONFIG="/etc/ssh/sshd_config"
+readonly AUTH_PRINCIPALS_DIR="/etc/ssh/auth_principals"
 readonly CA_URL="${VAULT_BASE_URL}/v1/${VAULT_SSH_USER_MOUNT_PATH}/public_key"
+
+# Set an sshd_config option, replacing any existing value
+set_sshd_option() {
+  local key="$1"
+  local value="$2"
+
+  if grep -qE "^${key}[[:space:]]" "${SSHD_CONFIG}"; then
+    if [[ "${PLATFORM}" == "macos" ]]; then
+      sudo sed -i '' "s|^${key}[[:space:]].*|${key} ${value}|" "${SSHD_CONFIG}"
+    else
+      sudo sed -i.bak "s|^${key}[[:space:]].*|${key} ${value}|" "${SSHD_CONFIG}"
+    fi
+    echo "  Updated existing ${key} line."
+  else
+    echo "${key} ${value}" | sudo tee -a "${SSHD_CONFIG}" > /dev/null
+    echo "  Added ${key} line."
+  fi
+}
 
 # Fetch CA public key from Vault
 info "Fetching CA public key from Vault..."
@@ -81,20 +107,21 @@ echo "  Done."
 
 # Update sshd_config
 info "Updating ${SSHD_CONFIG}..."
+set_sshd_option TrustedUserCAKeys "${CA_KEY_PATH}"
 
-# Check if TrustedUserCAKeys already exists
-if grep -q "^TrustedUserCAKeys" "${SSHD_CONFIG}"; then
-  # Update existing line
-  if [[ "${PLATFORM}" == "macos" ]]; then
-    sudo sed -i '' "s|^TrustedUserCAKeys.*|TrustedUserCAKeys ${CA_KEY_PATH}|" "${SSHD_CONFIG}"
-  else
-    sudo sed -i.bak "s|^TrustedUserCAKeys.*|TrustedUserCAKeys ${CA_KEY_PATH}|" "${SSHD_CONFIG}"
-  fi
-  echo "  Updated existing TrustedUserCAKeys line."
+# Map certificate principals onto local accounts, if any were requested
+if [[ -n "${CSSH_ALLOWED_PRINCIPALS:-}" ]]; then
+  echo
+  "${HERE}/configure-principals"
+  set_sshd_option AuthorizedPrincipalsFile "${AUTH_PRINCIPALS_DIR}/%u"
+fi
+
+# Validate before restarting: a rejected config would lock out new logins
+info "Validating sshd configuration..."
+if sudo /usr/sbin/sshd -t; then
+  echo "  Configuration valid."
 else
-  # Add new line
-  echo "TrustedUserCAKeys ${CA_KEY_PATH}" | sudo tee -a "${SSHD_CONFIG}" > /dev/null
-  echo "  Added TrustedUserCAKeys line."
+  fail "sshd rejected the configuration; not restarting. Review ${SSHD_CONFIG}."
 fi
 
 # Restart sshd

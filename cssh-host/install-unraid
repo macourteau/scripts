@@ -14,6 +14,13 @@
 # Required environment variables (set by main install script):
 #   VAULT_BASE_URL              - Vault server URL
 #   VAULT_SSH_USER_MOUNT_PATH   - Mount path for user certs
+#
+# Optional environment variables:
+#   CSSH_ALLOWED_PRINCIPALS     - certificate principals permitted to log in
+#   CSSH_PRINCIPAL_USERS        - local accounts they may log in as
+
+HERE=$(cd "$(dirname "$0")" && pwd)
+readonly HERE
 
 # Colors
 if [[ -t 1 ]]; then
@@ -53,6 +60,7 @@ fi
 readonly BOOT_SSH_DIR="/boot/config/ssh"
 readonly ETC_SSH_DIR="/etc/ssh"
 readonly CA_KEY_NAME="trusted-user-ca-keys.pem"
+readonly AUTH_PRINCIPALS_DIR="/etc/ssh/auth_principals"
 readonly CA_URL="${VAULT_BASE_URL}/v1/${VAULT_SSH_USER_MOUNT_PATH}/public_key"
 
 # Fetch CA public key from Vault
@@ -92,23 +100,47 @@ if [[ ! -f "${BOOT_SSH_DIR}/sshd_config" ]]; then
   cp "${ETC_SSH_DIR}/sshd_config" "${BOOT_SSH_DIR}/sshd_config"
 fi
 
-# Update sshd_config in both locations
-update_sshd_config() {
+# Set an sshd_config option in one config file, replacing any existing value
+set_sshd_option() {
   local config_file="$1"
+  local key="$2"
+  local value="$3"
 
-  if grep -q "^TrustedUserCAKeys" "${config_file}"; then
-    # Update existing line
-    sed -i.bak "s|^TrustedUserCAKeys.*|TrustedUserCAKeys ${ETC_SSH_DIR}/${CA_KEY_NAME}|" "${config_file}"
-    echo "  Updated TrustedUserCAKeys in ${config_file}"
+  if grep -qE "^${key}[[:space:]]" "${config_file}"; then
+    sed -i.bak "s|^${key}[[:space:]].*|${key} ${value}|" "${config_file}"
+    echo "  Updated ${key} in ${config_file}"
   else
-    # Add new line
-    echo "TrustedUserCAKeys ${ETC_SSH_DIR}/${CA_KEY_NAME}" >> "${config_file}"
-    echo "  Added TrustedUserCAKeys to ${config_file}"
+    echo "${key} ${value}" >> "${config_file}"
+    echo "  Added ${key} to ${config_file}"
   fi
 }
 
-update_sshd_config "${BOOT_SSH_DIR}/sshd_config"
-update_sshd_config "${ETC_SSH_DIR}/sshd_config"
+for config_file in "${BOOT_SSH_DIR}/sshd_config" "${ETC_SSH_DIR}/sshd_config"; do
+  set_sshd_option "${config_file}" TrustedUserCAKeys "${ETC_SSH_DIR}/${CA_KEY_NAME}"
+done
+
+# Map certificate principals onto local accounts, if any were requested
+if [[ -n "${CSSH_ALLOWED_PRINCIPALS:-}" ]]; then
+  echo
+  "${HERE}/configure-principals"
+
+  # Unraid rebuilds /etc/ssh from /boot on boot, so stage a copy there too
+  rm -rf "${BOOT_SSH_DIR}/auth_principals"
+  cp -r "${AUTH_PRINCIPALS_DIR}" "${BOOT_SSH_DIR}/auth_principals"
+  echo "  Staged a copy in ${BOOT_SSH_DIR}/auth_principals"
+
+  for config_file in "${BOOT_SSH_DIR}/sshd_config" "${ETC_SSH_DIR}/sshd_config"; do
+    set_sshd_option "${config_file}" AuthorizedPrincipalsFile "${AUTH_PRINCIPALS_DIR}/%u"
+  done
+fi
+
+# Validate before restarting: a rejected config would lock out new logins
+info "Validating sshd configuration..."
+if /usr/sbin/sshd -t; then
+  echo "  Configuration valid."
+else
+  fail "sshd rejected the configuration; not restarting. Review ${ETC_SSH_DIR}/sshd_config."
+fi
 
 # Restart sshd
 info "Restarting sshd..."
@@ -126,5 +158,12 @@ echo "This host will now accept SSH connections authenticated with certificates"
 echo "signed by the Vault CA at: ${VAULT_BASE_URL}"
 echo
 echo "Configuration persists across reboots via ${BOOT_SSH_DIR}/"
+if [[ -n "${CSSH_ALLOWED_PRINCIPALS:-}" ]]; then
+  echo
+  echo "Unraid restores ${ETC_SSH_DIR}/ from ${BOOT_SSH_DIR}/ on boot. Whether it"
+  echo "restores the staged auth_principals directory as well as it does single"
+  echo "files is untested. If certificate logins under a service account stop"
+  echo "working after a reboot, re-run this installer."
+fi
 echo
 echo "To test, connect from a client with a valid signed certificate."
