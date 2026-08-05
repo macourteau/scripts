@@ -5,16 +5,25 @@
 # Usage:
 #   config add [--pattern PATTERN] [--ssh-config PATH]
 #   config list [--ssh-config PATH]
+#   config refresh [--pattern PATTERN] [--ssh-config PATH]
 #   config remove --pattern PATTERN [--ssh-config PATH]
 #
 # Commands:
 #   add      Add a host pattern to SSH config (interactive if --pattern not given)
 #   list     List all cssh-managed host patterns
+#   refresh  Rewrite managed blocks from the current environment (all blocks
+#            unless --pattern is given)
 #   remove   Remove a host pattern from SSH config
 #
 # Options:
 #   --pattern PATTERN    Host pattern (e.g., "*.example.com")
 #   --ssh-config PATH    SSH config file (default: $CSSH_SSH_CONFIG or ~/.ssh/config)
+#
+# Refresh regenerates the Match line and the CertificateFile, IdentityFile and
+# IdentitiesOnly options from SSH_PUBLIC_KEY_PATH and CSSH_CACHE_DIR. Use it
+# after changing your key, or on a machine whose configuration was copied from
+# another. Any other option you added to a block by hand, such as "User ci", is
+# preserved in place.
 
 HERE=$(cd "$(dirname "$0")" && pwd)
 readonly HERE
@@ -42,8 +51,46 @@ warn() {
 }
 
 usage() {
-  head -18 "$0" | tail -16
+  head -26 "$0" | tail -24
   exit "${1:-0}"
+}
+
+# Options this script owns inside a managed block, in the order `add` writes
+# them. Everything else in a block belongs to whoever put it there.
+readonly MANAGED_KEYS="CertificateFile IdentityFile IdentitiesOnly"
+
+is_managed_key() {
+  case " ${MANAGED_KEYS} " in
+    *" $1 "*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# Derive the managed paths from the environment. Sets CERT_PATH, PRIVATE_KEY
+# and ENSURE_CERT_PATH.
+derive_paths() {
+  if [[ -z "${SSH_PUBLIC_KEY_PATH:-}" ]]; then
+    fail "SSH_PUBLIC_KEY_PATH not set. Run 'install' first or source ~/.profile.d/cssh"
+  fi
+
+  local key_basename key_name cache_dir
+  key_basename=$(basename "${SSH_PUBLIC_KEY_PATH}")
+  key_name="${key_basename%.pub}"
+  cache_dir="${CSSH_CACHE_DIR:-${HOME}/.cache/cssh}"
+
+  CERT_PATH="${cache_dir}/${key_name}-cert.pub"
+  PRIVATE_KEY="${SSH_PUBLIC_KEY_PATH%.pub}"
+  ENSURE_CERT_PATH="${HERE}/ensure-cert"
+}
+
+# Current value for a managed option. Requires derive_paths.
+managed_value() {
+  case "$1" in
+    CertificateFile) echo "${CERT_PATH}" ;;
+    IdentityFile) echo "${PRIVATE_KEY}" ;;
+    IdentitiesOnly) echo "yes" ;;
+    *) fail "not a managed option: $1" ;;
+  esac
 }
 
 # Get SSH config path (argument > env var > default)
@@ -87,7 +134,8 @@ pattern_exists() {
     return 1
   fi
 
-  grep -q "^# cssh-managed: ${pattern}\$" "${config_path}" 2>/dev/null
+  # Fixed-string whole-line match: host patterns contain regex metacharacters
+  grep -Fxq "# cssh-managed: ${pattern}" "${config_path}" 2>/dev/null
 }
 
 # Prompt for yes/no
@@ -139,10 +187,7 @@ cmd_add() {
 
   config_path=$(get_ssh_config_path "${config_path}")
 
-  # Validate environment
-  if [[ -z "${SSH_PUBLIC_KEY_PATH:-}" ]]; then
-    fail "SSH_PUBLIC_KEY_PATH not set. Run 'install' first or source ~/.profile.d/cssh"
-  fi
+  derive_paths
 
   # Interactive mode if pattern not provided
   if [[ -z "${pattern}" ]]; then
@@ -158,23 +203,14 @@ cmd_add() {
     fail "pattern '${pattern}' already exists in ${config_path}"
   fi
 
-  # Derive paths from environment
-  local key_basename
-  key_basename=$(basename "${SSH_PUBLIC_KEY_PATH}")
-  local key_name="${key_basename%.pub}"
-  local cache_dir="${CSSH_CACHE_DIR:-${HOME}/.cache/cssh}"
-  local cert_path="${cache_dir}/${key_name}-cert.pub"
-  local private_key="${SSH_PUBLIC_KEY_PATH%.pub}"
-  local ensure_cert_path="${HERE}/ensure-cert"
-
   # Summary
   echo
   echo "Configuration summary:"
   echo "  SSH config file:  ${config_path}"
   echo "  Host pattern:     ${pattern}"
-  echo "  Certificate:      ${cert_path}"
-  echo "  Private key:      ${private_key}"
-  echo "  Match exec cmd:   ${ensure_cert_path} --quiet"
+  echo "  Certificate:      ${CERT_PATH}"
+  echo "  Private key:      ${PRIVATE_KEY}"
+  echo "  Match exec cmd:   ${ENSURE_CERT_PATH} --quiet"
   echo
 
   if ! confirm "Add this configuration?"; then
@@ -189,9 +225,9 @@ cmd_add() {
   cat >> "${config_path}" <<EOF
 
 # cssh-managed: ${pattern}
-Match host ${pattern} exec "${ensure_cert_path} --quiet"
-    CertificateFile ${cert_path}
-    IdentityFile ${private_key}
+Match host ${pattern} exec "${ENSURE_CERT_PATH} --quiet"
+    CertificateFile ${CERT_PATH}
+    IdentityFile ${PRIVATE_KEY}
     IdentitiesOnly yes
 EOF
 
@@ -238,61 +274,115 @@ cmd_list() {
   fi
 }
 
-# Generate config with pattern removed (writes to tmp_file, does not modify original)
-generate_config_without_pattern() {
-  local config_path="$1"
-  local pattern="$2"
-  local tmp_file="$3"
+# Append the managed options a block did not already carry
+flush_managed_options() {
+  local tmp_file="$1"
+  local seen="$2"
+  local managed
 
-  # State machine to remove the block
-  # Block format:
-  #   # cssh-managed: PATTERN
-  #   Match host PATTERN exec "..."
-  #       Option1 value
-  #       Option2 value
-  #   (blank line or next block)
-  local in_block=0
-  local skip_blank=0
+  for managed in ${MANAGED_KEYS}; do
+    case " ${seen} " in
+      *" ${managed} "*) continue ;;
+    esac
+    printf '    %s %s\n' "${managed}" "$(managed_value "${managed}")" >> "${tmp_file}"
+  done
+}
+
+# Walk the config applying MODE ("remove" or "refresh") to every managed block
+# matching PATTERN, writing the result to TMP_FILE. An empty PATTERN matches
+# every block. The original is not modified.
+#
+# A block is the "# cssh-managed:" marker, the Match line directly below it,
+# and every indented option line after that, ending at the first line which is
+# not an indented option. Refresh rewrites the Match line and the managed
+# options in place and leaves every other line where it is.
+rewrite_config() {
+  local mode="$1"
+  local pattern="$2"
+  local config_path="$3"
+  local tmp_file="$4"
+
+  # 0 = outside a block, 1 = the Match line comes next, 2 = inside the options
+  local state=0
+  local block_pattern=""
+  local seen=""
+  local pending_blank=0
+  local line key
 
   while IFS= read -r line || [[ -n "${line}" ]]; do
-    # Check if this is the start of our block
-    if [[ "${line}" == "# cssh-managed: ${pattern}" ]]; then
-      in_block=1
-      skip_blank=1
-      continue
-    fi
-
-    if [[ ${in_block} -eq 1 ]]; then
-      # Check if we've reached the end of the block
+    # Inside a block, an indented non-empty line is one of its options
+    if [[ ${state} -eq 2 ]]; then
       case "${line}" in
-        "# cssh-managed:"*|"Host "*|"Match "*)
-          # Start of a new block - we're done skipping
-          in_block=0
-          skip_blank=0
-          echo "${line}" >> "${tmp_file}"
-          ;;
-        "")
-          # Blank line - skip it if we just finished the block
-          if [[ ${skip_blank} -eq 1 ]]; then
-            skip_blank=0
+        [[:space:]]*[![:space:]]*)
+          if [[ "${mode}" == "remove" ]]; then
+            continue
+          fi
+          read -r key _ <<< "${line}"
+          if is_managed_key "${key}"; then
+            printf '    %s %s\n' "${key}" "$(managed_value "${key}")" >> "${tmp_file}"
+            seen="${seen} ${key}"
           else
             echo "${line}" >> "${tmp_file}"
           fi
-          ;;
-        "    "*)
-          # Indented line (part of block) - skip it
-          ;;
-        *)
-          # Non-indented, non-empty line - end of block
-          in_block=0
-          skip_blank=0
-          echo "${line}" >> "${tmp_file}"
+          continue
           ;;
       esac
-    else
-      echo "${line}" >> "${tmp_file}"
+
+      if [[ "${mode}" == "refresh" ]]; then
+        flush_managed_options "${tmp_file}" "${seen}"
+      fi
+      state=0
+      seen=""
     fi
+
+    # The line directly below a marker is the block's Match line
+    if [[ ${state} -eq 1 ]]; then
+      if [[ "${line}" == "Match "* ]]; then
+        state=2
+        if [[ "${mode}" == "refresh" ]]; then
+          printf 'Match host %s exec "%s --quiet"\n' \
+            "${block_pattern}" "${ENSURE_CERT_PATH}" >> "${tmp_file}"
+        fi
+        continue
+      fi
+      warn "block '${block_pattern}' has no Match line; leaving its contents alone"
+      state=0
+    fi
+
+    if [[ "${line}" == "# cssh-managed: "* ]]; then
+      block_pattern="${line#\# cssh-managed: }"
+      if [[ -z "${pattern}" ]] || [[ "${block_pattern}" == "${pattern}" ]]; then
+        state=1
+        seen=""
+        if [[ "${mode}" == "remove" ]]; then
+          # Drop the blank line that `add` wrote above the marker
+          pending_blank=0
+          continue
+        fi
+      fi
+    fi
+
+    # Hold blank lines so a removed block does not leave a gap behind
+    if [[ -z "${line}" ]]; then
+      pending_blank=1
+      continue
+    fi
+
+    if [[ ${pending_blank} -eq 1 ]]; then
+      echo "" >> "${tmp_file}"
+      pending_blank=0
+    fi
+    echo "${line}" >> "${tmp_file}"
   done < "${config_path}"
+
+  # The file may end inside a block
+  if [[ ${state} -eq 2 ]] && [[ "${mode}" == "refresh" ]]; then
+    flush_managed_options "${tmp_file}" "${seen}"
+  fi
+
+  if [[ ${pending_blank} -eq 1 ]]; then
+    echo "" >> "${tmp_file}"
+  fi
 }
 
 # Remove command
@@ -340,7 +430,7 @@ cmd_remove() {
   trap 'rm -f "${tmp_file}"' RETURN
 
   # Generate new config without the pattern
-  generate_config_without_pattern "${config_path}" "${pattern}" "${tmp_file}"
+  rewrite_config remove "${pattern}" "${config_path}" "${tmp_file}"
 
   # Show diff of what will be removed
   echo "Changes to ${config_path}:"
@@ -360,6 +450,92 @@ cmd_remove() {
   echo -e "${GREEN}Removed configuration for '${pattern}' from ${config_path}${NC}"
 }
 
+# Refresh command
+cmd_refresh() {
+  local config_path=""
+  local pattern=""
+
+  # Parse arguments
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --pattern)
+        pattern="$2"
+        shift 2
+        ;;
+      --ssh-config)
+        config_path="$2"
+        shift 2
+        ;;
+      --help|-h)
+        usage 0
+        ;;
+      *)
+        fail "unknown option: $1"
+        ;;
+    esac
+  done
+
+  config_path=$(get_ssh_config_path "${config_path}")
+
+  if [[ ! -f "${config_path}" ]]; then
+    fail "SSH config file not found: ${config_path}"
+  fi
+
+  if ! grep -q "^# cssh-managed:" "${config_path}" 2>/dev/null; then
+    echo "No cssh-managed patterns found in ${config_path}"
+    exit 0
+  fi
+
+  if [[ -n "${pattern}" ]] && ! pattern_exists "${config_path}" "${pattern}"; then
+    fail "pattern '${pattern}' not found in ${config_path}"
+  fi
+
+  derive_paths
+
+  if [[ ! -f "${SSH_PUBLIC_KEY_PATH}" ]]; then
+    warn "SSH public key not found: ${SSH_PUBLIC_KEY_PATH}"
+  fi
+
+  echo
+  echo "Refreshing from:"
+  echo "  SSH config file:  ${config_path}"
+  if [[ -n "${pattern}" ]]; then
+    echo "  Host pattern:     ${pattern}"
+  else
+    echo "  Host pattern:     (all managed blocks)"
+  fi
+  echo "  Certificate:      ${CERT_PATH}"
+  echo "  Private key:      ${PRIVATE_KEY}"
+  echo "  Match exec cmd:   ${ENSURE_CERT_PATH} --quiet"
+  echo
+
+  local tmp_file
+  tmp_file=$(mktemp)
+  trap 'rm -f "${tmp_file}"' RETURN
+
+  rewrite_config refresh "${pattern}" "${config_path}" "${tmp_file}"
+
+  if cmp -s "${config_path}" "${tmp_file}"; then
+    echo -e "${GREEN}Already up to date.${NC}"
+    exit 0
+  fi
+
+  echo "Changes to ${config_path}:"
+  echo
+  diff --color=auto -u "${config_path}" "${tmp_file}" || true
+  echo
+
+  if ! confirm "Apply these changes?"; then
+    echo "Aborted."
+    exit 0
+  fi
+
+  cp "${tmp_file}" "${config_path}"
+  chmod 600 "${config_path}"
+
+  echo -e "${GREEN}Refreshed ${config_path}${NC}"
+}
+
 # Main
 case "${1:-}" in
   add)
@@ -369,6 +545,10 @@ case "${1:-}" in
   list)
     shift
     cmd_list "$@"
+    ;;
+  refresh)
+    shift
+    cmd_refresh "$@"
     ;;
   remove)
     shift
